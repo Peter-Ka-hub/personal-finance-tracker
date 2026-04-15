@@ -6,8 +6,7 @@ on:
   push:
     branches:
       - master
-
-    workflow_dispatch:
+  workflow_dispatch:
 
 # 2. JAKIE ZADANIA MA WYKONAĆ "ROBOT"?
 jobs:
