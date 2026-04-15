@@ -1,11 +1,11 @@
 name: Zbuduj, Przetestuj i Wdróż Menedżer Finansów na Azure
 
 # 1. KIEDY URUCHAMIA SIĘ POTOK?
-# Gdy zrobisz 'git push' na gałąź 'main'
+# Gdy zrobisz 'git push' na gałąź 'master'
 on:
   push:
     branches:
-      - main
+      - master
 
 # 2. JAKIE ZADANIA MA WYKONAĆ "ROBOT"?
 jobs:
@@ -32,31 +32,31 @@ jobs:
         run: npm run build
 
   # --- ETAP 2: CIĄGŁE WDRAŻANIE (CD) - DOCKER I AZURE ---
-  docker-build-and-deploy:
-    # Ten etap uruchomi się TYLKO, jeśli testy (powyżej) zakończą się sukcesem
-    needs: build-and-test
-    runs-on: ubuntu-latest
+  # docker-build-and-deploy:
+  #   # Ten etap uruchomi się TYLKO, jeśli testy (powyżej) zakończą się sukcesem
+  #   needs: build-and-test
+  #   runs-on: ubuntu-latest
 
-    steps:
-      - name: Pobranie kodu
-        uses: actions/checkout@v3
+  #   steps:
+  #     - name: Pobranie kodu
+  #       uses: actions/checkout@v3
 
-      - name: Logowanie do Azure Container Registry (Prywatny magazyn Dockera)
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+  #     - name: Logowanie do Azure Container Registry (Prywatny magazyn Dockera)
+  #       uses: azure/docker-login@v1
+  #       with:
+  #         login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+  #         username: ${{ secrets.REGISTRY_USERNAME }}
+  #         password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Budowanie i wysyłanie obrazu Docker
-        # Budujemy obraz i od razu wysyłamy go na Azure
-        run: |
-          docker build . -t ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
-          docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
+  #     - name: Budowanie i wysyłanie obrazu Docker
+  #       # Budujemy obraz i od razu wysyłamy go na Azure
+  #       run: |
+  #         docker build . -t ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
+  #         docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
 
-      - name: Wdrożenie aplikacji na Azure Web App for Containers
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: "nazwa-twojej-aplikacji-na-azure" # <- tu wpiszesz nazwę usługi z Azure
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: "${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}"
+  #     - name: Wdrożenie aplikacji na Azure Web App for Containers
+  #       uses: azure/webapps-deploy@v2
+  #       with:
+  #         app-name: ${{ secrets.AZURE_APP_NAME }}
+  #         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+  #         images: "${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}"
