@@ -25,7 +25,7 @@ jobs:
       - name: Instalacja zależności (npm install)
         run: npm ci
 
-      - name: Uruchomienie testów jednostkowych (TU ZDOBYWASZ PUNKTY NA BDB)
+      - name: Uruchomienie testów jednostkowych
         # Ten krok sprawdzi, czy aplikacja przechodzi testy przed jej wdrożeniem
         run: npm test -- --passWithNoTests
 
@@ -33,31 +33,31 @@ jobs:
         run: npm run build
 
   # --- ETAP 2: CIĄGŁE WDRAŻANIE (CD) - DOCKER I AZURE ---
-  # docker-build-and-deploy:
-  #   # Ten etap uruchomi się TYLKO, jeśli testy (powyżej) zakończą się sukcesem
-  #   needs: build-and-test
-  #   runs-on: ubuntu-latest
+  docker-build-and-deploy:
+    # Ten etap uruchomi się TYLKO, jeśli testy (powyżej) zakończą się sukcesem
+    needs: build-and-test
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - name: Pobranie kodu
-  #       uses: actions/checkout@v3
+    steps:
+      - name: Pobranie kodu
+        uses: actions/checkout@v3
 
-  #     - name: Logowanie do Azure Container Registry (Prywatny magazyn Dockera)
-  #       uses: azure/docker-login@v1
-  #       with:
-  #         login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-  #         username: ${{ secrets.REGISTRY_USERNAME }}
-  #         password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Logowanie do Azure Container Registry (Prywatny magazyn Dockera)
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
-  #     - name: Budowanie i wysyłanie obrazu Docker
-  #       # Budujemy obraz i od razu wysyłamy go na Azure
-  #       run: |
-  #         docker build . -t ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
-  #         docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
+      - name: Budowanie i wysyłanie obrazu Docker
+        # Budujemy obraz i od razu wysyłamy go na Azure
+        run: |
+          docker build . -t ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
+          docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}
 
-  #     - name: Wdrożenie aplikacji na Azure Web App for Containers
-  #       uses: azure/webapps-deploy@v2
-  #       with:
-  #         app-name: ${{ secrets.AZURE_APP_NAME }}
-  #         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-  #         images: "${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}"
+      - name: Wdrożenie aplikacji na Azure Web App for Containers
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.AZURE_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: "${{ secrets.REGISTRY_LOGIN_SERVER }}/finanse-app:${{ github.sha }}"
