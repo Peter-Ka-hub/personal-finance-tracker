@@ -114,10 +114,15 @@ export default function Charts() {
     queryKey: ["transactions"],
     queryFn: getTransactions,
   });
-  const { isLoading: catLoading } = useQuery({
+  const { data: categories = [], isLoading: catLoading } = useQuery({
     queryKey: ["categories"],
     queryFn: getCategories,
   });
+
+  const categoriesMap = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c])),
+    [categories]
+  );
 
   // Grupowanie wydatków po kategorii
   const expensesByCategory = useMemo(() => {
@@ -125,8 +130,9 @@ export default function Charts() {
     const total = expenses.reduce((s, t) => s + parseFloat(t.amount), 0);
     const grouped = expenses.reduce((acc, curr) => {
       const val = parseFloat(curr.amount);
-      const catName = curr.category ? curr.category.name : "Inne";
-      const catColor = curr.category?.color || null;
+      const cat = categoriesMap[curr.categoryId];
+      const catName = cat ? cat.name : "Inne";
+      const catColor = cat?.color || null;
       if (!acc[catName]) {
         acc[catName] = { value: 0, color: catColor };
       }
@@ -142,7 +148,7 @@ export default function Charts() {
         percentage: total > 0 ? Math.round((data.value / total) * 100) : 0,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [transactions]);
+  }, [transactions, categoriesMap]);
 
   // Grupowanie przychodów po kategorii
   const incomeByCategory = useMemo(() => {
@@ -150,8 +156,9 @@ export default function Charts() {
     const total = incomes.reduce((s, t) => s + parseFloat(t.amount), 0);
     const grouped = incomes.reduce((acc, curr) => {
       const val = parseFloat(curr.amount);
-      const catName = curr.category ? curr.category.name : "Inne";
-      const catColor = curr.category?.color || null;
+      const cat = categoriesMap[curr.categoryId];
+      const catName = cat ? cat.name : "Inne";
+      const catColor = cat?.color || null;
       if (!acc[catName]) {
         acc[catName] = { value: 0, color: catColor };
       }
@@ -167,7 +174,7 @@ export default function Charts() {
         percentage: total > 0 ? Math.round((data.value / total) * 100) : 0,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [transactions]);
+  }, [transactions, categoriesMap]);
 
   const totalExpense = useMemo(
     () =>

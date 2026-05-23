@@ -1,0 +1,84 @@
+version: '3.9'
+
+# Copy .env.example to .env and fill in credentials before running.
+# Start with: docker-compose up --build
+
+networks:
+  microservices-net:
+    driver: bridge
+
+services:
+  # ── API Gateway ─────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - auth
+      - categories
+      - transactions
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  # ── Auth Service :3001 ───────────────────────────────────────────────────────
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    expose:
+      - "3001"
+    environment:
+      PORT: 3001
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      CATEGORIES_SERVICE_URL: http://categories:3002
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  # ── Category Service :3002 ───────────────────────────────────────────────────
+  categories:
+    build:
+      context: ./services/categories
+      dockerfile: Dockerfile
+    expose:
+      - "3002"
+    environment:
+      PORT: 3002
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  # ── Transaction Service :3003 ────────────────────────────────────────────────
+  transactions:
+    build:
+      context: ./services/transactions
+      dockerfile: Dockerfile
+    expose:
+      - "3003"
+    environment:
+      PORT: 3003
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - microservices-net
+    restart: unless-stopped
