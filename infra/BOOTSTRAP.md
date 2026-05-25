@@ -44,16 +44,16 @@ echo "AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)"
 
 W repo → Settings → Secrets → Actions, dodaj:
 
-| Secret | Wartość |
-|--------|---------|
-| `AZURE_CLIENT_ID` | z kroku 2 |
-| `AZURE_TENANT_ID` | z kroku 2 |
-| `AZURE_SUBSCRIPTION_ID` | z kroku 2 |
-| `RESOURCE_GROUP` | `rg-finance-tracker-prod` |
-| `ACR_NAME` | `acrfinancetracker` |
-| `POSTGRES_ADMIN_PASSWORD` | silne hasło (min. 16 znaków) |
-| `REACT_APP_API_URL` | `https://<gateway-fqdn>/api` (po deployu infra) |
-| `SWA_DEPLOY_TOKEN` | z Azure Portal → Static Web App → Manage token |
+| Secret                    | Wartość                                         |
+| ------------------------- | ----------------------------------------------- |
+| `AZURE_CLIENT_ID`         | z kroku 2                                       |
+| `AZURE_TENANT_ID`         | z kroku 2                                       |
+| `AZURE_SUBSCRIPTION_ID`   | z kroku 2                                       |
+| `RESOURCE_GROUP`          | `rg-finance-tracker-prod`                       |
+| `ACR_NAME`                | `acrfinancetracker`                             |
+| `POSTGRES_ADMIN_PASSWORD` | silne hasło (min. 16 znaków)                    |
+| `REACT_APP_API_URL`       | `https://<gateway-fqdn>/api` (po deployu infra) |
+| `SWA_DEPLOY_TOKEN`        | z Azure Portal → Static Web App → Manage token  |
 
 ## 4. Uruchom infra workflow (pierwszy deploy)
 
