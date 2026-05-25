@@ -60,6 +60,11 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries(["transactions"]),
   });
 
+  // categoryId → category object lookup
+  const categoriesMap = useMemo(() => {
+    return Object.fromEntries(categories.map((c) => [c.id, c]));
+  }, [categories]);
+
   // Filtrowane transakcje wg zakresu dat
   const transactions = useMemo(() => {
     return allTransactions.filter((t) => {
@@ -91,8 +96,9 @@ export default function Dashboard() {
     const expenses = transactions.filter((t) => t.type === "expense");
     const grouped = expenses.reduce((acc, curr) => {
       const val = parseFloat(curr.amount);
-      const catName = curr.category ? curr.category.name : "Inne";
-      const catColor = curr.category?.color || "#9CA3AF";
+      const cat = categoriesMap[curr.categoryId];
+      const catName = cat ? cat.name : "Inne";
+      const catColor = cat?.color || "#9CA3AF";
       if (!acc[catName]) {
         acc[catName] = { value: 0, color: catColor };
       }
@@ -110,8 +116,9 @@ export default function Dashboard() {
     const incomes = transactions.filter((t) => t.type === "income");
     const grouped = incomes.reduce((acc, curr) => {
       const val = parseFloat(curr.amount);
-      const catName = curr.category ? curr.category.name : "Inne";
-      const catColor = curr.category?.color || "#9CA3AF";
+      const cat = categoriesMap[curr.categoryId];
+      const catName = cat ? cat.name : "Inne";
+      const catColor = cat?.color || "#9CA3AF";
       if (!acc[catName]) {
         acc[catName] = { value: 0, color: catColor };
       }
@@ -381,8 +388,8 @@ export default function Dashboard() {
                           <span
                             className="bg-white px-2 py-0.5 rounded border shadow-sm flex items-center gap-1.5"
                             style={{
-                              borderColor: t.category?.color
-                                ? `${t.category.color}40`
+                              borderColor: categoriesMap[t.categoryId]?.color
+                                ? `${categoriesMap[t.categoryId].color}40`
                                 : "#e2e8f0",
                             }}
                           >
@@ -390,11 +397,11 @@ export default function Dashboard() {
                               className="w-1.5 h-1.5 rounded-full"
                               style={{
                                 backgroundColor:
-                                  t.category?.color || "#cbd5e1",
+                                  categoriesMap[t.categoryId]?.color || "#cbd5e1",
                               }}
                             ></span>
-                            {t.category
-                              ? t.category.name
+                            {categoriesMap[t.categoryId]
+                              ? categoriesMap[t.categoryId].name
                               : "Nieznana kategoria"}
                           </span>
                           <span>•</span>
