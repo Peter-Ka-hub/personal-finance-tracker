@@ -28,6 +28,8 @@ po migracji do mikrousług, z niedziałającym potokiem CI/CD i niewdrożoną in
 | 17 | PostgreSQL niedostępny w `germanywestcentral` (`LocationIsOfferRestricted`) | Azure | powrót do Poland Central (tam DB działa) |
 | 18 | Reużyte środowisko nie ma VNet → baza prywatna niemożliwa | infra | PostgreSQL **publiczny + SSL** + firewall (tylko usługi Azure) |
 | 19 | „Duch” nazwy zasobu po zmianach regionu (ARM blokuje lokalizację) | Azure | nowa nazwa serwera DB (`psql-finance-tracker-pc`) |
+| 20 | Apps nie mogą „join” środowiska w innej grupie (`LinkedAuthorizationFailed`) | Azure | rola na zasób środowiska dla konta wdrożeniowego |
+| 21 | Container Apps zwraca **426** dla HTTP/1.0 (nginx domyślnie 1.0) | gateway | `proxy_http_version 1.1` + upstreamy po HTTPS/443 |
 
 ---
 
@@ -224,7 +226,41 @@ po migracji do mikrousług, z niedziałającym potokiem CI/CD i niewdrożoną in
   validate`.
 - **Pliki:** `infra/modules/postgres.bicep`.
 
+### 20. Aplikacje nie mogą „join” środowiska w innej grupie zasobów
+- **Objaw:** krok „Deploy container apps”: `LinkedAuthorizationFailed` — konto ma
+  `Microsoft.App/containerApps/write` na `rg-finance-tracker-prod`, ale brakuje
+  `Microsoft.App/managedEnvironments/join/action` na środowisku w `additional-res`.
+- **Przyczyna:** reużywane środowisko leży w innej grupie zasobów, na której konto wdrożeniowe
+  (Contributor tylko na `rg-finance-tracker-prod`) nie ma uprawnień.
+- **Rozwiązanie:** nadałem kontu wdrożeniowemu (SP) rolę **Contributor o zasięgu wyłącznie tego
+  jednego zasobu środowiska** (minimalny zakres). Z powodu znanego błędu CLI
+  (`MissingSubscription`) przypisanie utworzone przez ARM REST (`az rest`).
+- **Gdzie:** Azure RBAC (zasób `managedEnvironment-additionalres-83b6`).
+
+### 21. Brama dostaje 426 „Upgrade Required” na każdą trasę `/api`
+- **Objaw:** wszystkie żądania proxowane przez bramę zwracały **426**, niezależnie od http/https.
+- **Diagnoza:** `curl` z wnętrza kontenera bramy do wewnętrznego FQDN serwisu (HTTP/1.1) zwracał
+  **200** — czyli sieć i TLS działają. Problem był w samym nginx.
+- **Przyczyna:** nginx domyślnie proxuje po **HTTP/1.0**, a ingress (Envoy) Container Apps odrzuca
+  HTTP/1.0 kodem 426. (`curl` używa 1.1 → 200.)
+- **Rozwiązanie:** `proxy_http_version 1.1;` + `proxy_set_header Connection "";` w `nginx.conf`,
+  a upstreamy kierowane po **HTTPS/443** (wewnętrzny ingress wymaga TLS); SNI/Host = FQDN serwisu.
+  Wywołanie auth→categories (Node) po HTTPS z `rejectUnauthorized:false` (cert wewnętrzny spoza
+  magazynu zaufania Node).
+- **Pliki:** `gateway/nginx.conf`, `gateway/Dockerfile`, `infra/apps.bicep`,
+  `services/auth/src/controllers/authController.js`.
+
+> Uwaga: zdarzył się też przejściowy błąd sieci `ECONNRESET` przy `npm ci` w buildzie obrazu w CI —
+> rozwiązany ponownym uruchomieniem joba (błąd niezwiązany z kodem).
+
 ## Stan końcowy i wnioski
+
+**✅ Wdrożenie zakończone sukcesem.** Po `git push` na `master`: testy jednostkowe + e2e przechodzą,
+a `deploy.yml` buduje 5 obrazów i wdraża je do Azure Container Apps. Aplikacja działa:
+- Brama (publiczny HTTPS): `https://ca-gateway.wonderfulsand-f41bf9c3.polandcentral.azurecontainerapps.io`
+- 5 kontenerów `Running` (auth/categories/transactions/frontend — wewnętrzne; gateway — zewnętrzny).
+- Testy e2e uruchomione przeciwko **żywej** instancji: **5/5 zielonych** (rejestracja → seed 10
+  kategorii → dodanie/listowanie transakcji → logowanie), dane zapisują się w Azure PostgreSQL.
 
 **Co działa (gotowe i zielone):**
 - Testy jednostkowe: auth 6, categories 7, transactions 6, frontend 3 — przechodzą lokalnie i w CI.
