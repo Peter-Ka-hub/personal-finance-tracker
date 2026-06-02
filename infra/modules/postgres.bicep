@@ -7,6 +7,9 @@ param tags object
 @description('Subnet ID for Postgres flexible server VNet integration')
 param dbSubnetId string
 
+@description('VNet ID to link the private DNS zone to (for name resolution)')
+param vnetId string
+
 @secure()
 @description('Administrator password')
 param adminPassword string
@@ -22,7 +25,25 @@ resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
   tags: tags
 }
 
+// Link the private DNS zone to the VNet so resources in it (Container Apps)
+// can resolve the server's private FQDN.
+resource dnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: privateDnsZone
+  name: 'link-to-vnet'
+  location: 'global'
+  tags: tags
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnetId
+    }
+  }
+}
+
 resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
+  dependsOn: [
+    dnsVnetLink
+  ]
   name: serverName
   location: location
   tags: tags

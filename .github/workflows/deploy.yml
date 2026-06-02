@@ -1,0 +1,149 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ── Gate: deploy only if unit tests pass ──────────────────────────────────────
+  test:
+    name: Unit tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [auth, categories, transactions]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+      - run: npm ci
+        working-directory: services/${{ matrix.service }}
+      - run: npm test
+        working-directory: services/${{ matrix.service }}
+
+  # ── Gate: full stack e2e through the gateway ─────────────────────────────────
+  e2e:
+    name: End-to-end (docker-compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env for docker-compose
+        run: |
+          cat > .env <<'EOF'
+          DB_HOST=postgres
+          DB_PORT=5432
+          DB_USER=financeuser
+          DB_PASSWORD=ci_test_password_123
+          DB_NAME=financedb
+          DB_SSL=false
+          JWT_SECRET=ci_jwt_secret_min_32_chars_aaaaaaaaaaaa
+          INTERNAL_API_KEY=ci_internal_api_key_min_32_chars_bbbb
+          EOF
+      - name: Build and start the stack
+        run: docker compose up -d --build
+      - name: Run e2e tests
+        run: node --test e2e/app.test.mjs
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -n 300
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ── Build images + deploy infra/apps to Azure ────────────────────────────────
+  deploy:
+    name: Build & deploy to Azure Container Apps
+    needs: [test, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 1. Base infra (VNet, ACR, Postgres, Container Apps Env). Creates the ACR
+      #    we push to in the next step. Idempotent on re-runs.
+      - name: Deploy base infrastructure
+        id: base
+        run: |
+          az deployment group create \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --name "base-${{ github.sha }}" \
+            --template-file infra/base.bicep \
+            --parameters postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+            --query properties.outputs -o json > base_outputs.json
+          {
+            echo "acrLoginServer=$(jq -r .acrLoginServer.value base_outputs.json)"
+            echo "acrName=$(jq -r .acrName.value base_outputs.json)"
+            echo "environmentId=$(jq -r .environmentId.value base_outputs.json)"
+            echo "postgresHost=$(jq -r .postgresHost.value base_outputs.json)"
+            echo "postgresDbName=$(jq -r .postgresDbName.value base_outputs.json)"
+            echo "postgresAdminLogin=$(jq -r .postgresAdminLogin.value base_outputs.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      # 2. Log in to ACR using its admin credentials (admin user enabled in
+      #    registry.bicep — works with a Contributor-only identity).
+      - name: Docker login to ACR
+        run: |
+          ACR_NAME="${{ steps.base.outputs.acrName }}"
+          ACR_USER=$(az acr credential show -n "$ACR_NAME" --query username -o tsv)
+          ACR_PW=$(az acr credential show -n "$ACR_NAME" --query 'passwords[0].value' -o tsv)
+          echo "$ACR_PW" | docker login "${{ steps.base.outputs.acrLoginServer }}" -u "$ACR_USER" --password-stdin
+
+      # 3. Build and push all five images, tagged with the commit SHA.
+      - name: Build and push images
+        env:
+          ACR: ${{ steps.base.outputs.acrLoginServer }}
+          TAG: ${{ github.sha }}
+        run: |
+          set -e
+          for svc in auth categories transactions; do
+            docker build "services/$svc" -t "$ACR/$svc:$TAG" -t "$ACR/$svc:latest"
+            docker push "$ACR/$svc:$TAG"
+            docker push "$ACR/$svc:latest"
+          done
+          docker build gateway -t "$ACR/gateway:$TAG" -t "$ACR/gateway:latest"
+          docker push "$ACR/gateway:$TAG"
+          docker push "$ACR/gateway:latest"
+          docker build frontend --build-arg REACT_APP_API_URL=/api -t "$ACR/frontend:$TAG" -t "$ACR/frontend:latest"
+          docker push "$ACR/frontend:$TAG"
+          docker push "$ACR/frontend:latest"
+
+      # 4. Deploy the Container Apps referencing the freshly pushed images.
+      - name: Deploy container apps
+        run: |
+          az deployment group create \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --name "apps-${{ github.sha }}" \
+            --template-file infra/apps.bicep \
+            --parameters \
+              environmentId="${{ steps.base.outputs.environmentId }}" \
+              acrLoginServer="${{ steps.base.outputs.acrLoginServer }}" \
+              acrName="${{ steps.base.outputs.acrName }}" \
+              imageTag="${{ github.sha }}" \
+              postgresHost="${{ steps.base.outputs.postgresHost }}" \
+              postgresDbName="${{ steps.base.outputs.postgresDbName }}" \
+              postgresAdminLogin="${{ steps.base.outputs.postgresAdminLogin }}" \
+              postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+
+      - name: Output gateway URL
+        run: |
+          URL=$(az deployment group show \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --name "apps-${{ github.sha }}" \
+            --query properties.outputs.gatewayUrl.value -o tsv)
+          echo "### Deployed 🎉" >> "$GITHUB_STEP_SUMMARY"
+          echo "Gateway: $URL" >> "$GITHUB_STEP_SUMMARY"

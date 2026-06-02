@@ -19,38 +19,57 @@ param containerPort int
 @description('Whether this app should have an external (internet-facing) ingress')
 param externalIngress bool = false
 
-@description('Environment variables for the container (plain-text only)')
+@description('Allow plain HTTP on the ingress (used for internal service-to-service traffic)')
+param allowInsecure bool = false
+
+@description('Minimum number of replicas')
+param minReplicas int = 1
+
+@description('Maximum number of replicas')
+param maxReplicas int = 3
+
+@description('Environment variables for the container')
 param envVars array = []
 
-@description('Secret references for the container (from Key Vault)')
+@description('Container secrets ({ name, value } entries)')
 param secretRefs array = []
 
 @description('ACR login server')
 param acrLoginServer string
 
+@description('ACR admin username (used to pull the image)')
+param acrUsername string
+
+@secure()
+@description('ACR admin password (used to pull the image)')
+param acrPassword string
+
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: appName
   location: location
   tags: tags
-  identity: {
-    type: 'SystemAssigned'
-  }
   properties: {
     environmentId: environmentId
     configuration: {
       ingress: {
         external: externalIngress
         targetPort: containerPort
-        transport: 'http'
-        allowInsecure: false
+        transport: 'auto'
+        allowInsecure: allowInsecure
       }
       registries: [
         {
           server: acrLoginServer
-          identity: 'system'
+          username: acrUsername
+          passwordSecretRef: 'acr-registry-password'
         }
       ]
-      secrets: secretRefs
+      secrets: concat(secretRefs, [
+        {
+          name: 'acr-registry-password'
+          value: acrPassword
+        }
+      ])
     }
     template: {
       containers: [
@@ -65,8 +84,8 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
-        maxReplicas: 2
+        minReplicas: minReplicas
+        maxReplicas: maxReplicas
         rules: [
           {
             name: 'http-scaling'
@@ -82,17 +101,5 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-// Grant AcrPull role to this app's managed identity on the ACR
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(containerApp.id, 'acrpull', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-  scope: resourceGroup()
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
-    principalId: containerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 output appFqdn string = containerApp.properties.configuration.ingress.fqdn
 output appName string = containerApp.name
-output principalId string = containerApp.identity.principalId

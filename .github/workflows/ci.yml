@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [master]
+
+jobs:
+  unit:
+    name: Unit tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, categories, transactions]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+      - run: npm ci
+        working-directory: services/${{ matrix.service }}
+      - run: npm test
+        working-directory: services/${{ matrix.service }}
+
+  frontend:
+    name: Frontend tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test -- --watchAll=false
+        working-directory: frontend
+        env:
+          CI: 'true'
+      - run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: /api
+
+  e2e:
+    name: End-to-end (docker-compose)
+    runs-on: ubuntu-latest
+    needs: [unit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env for docker-compose
+        run: |
+          cat > .env <<'EOF'
+          DB_HOST=postgres
+          DB_PORT=5432
+          DB_USER=financeuser
+          DB_PASSWORD=ci_test_password_123
+          DB_NAME=financedb
+          DB_SSL=false
+          JWT_SECRET=ci_jwt_secret_min_32_chars_aaaaaaaaaaaa
+          INTERNAL_API_KEY=ci_internal_api_key_min_32_chars_bbbb
+          EOF
+      - name: Build and start the stack
+        run: docker compose up -d --build
+      - name: Run e2e tests
+        run: node --test e2e/app.test.mjs
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -n 300
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

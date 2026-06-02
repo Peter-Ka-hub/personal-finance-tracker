@@ -1,6 +1,14 @@
 # Azure Bootstrap — jednorazowa konfiguracja
 
-Uruchom te kroki **raz** przed pierwszym deplojem przez GitHub Actions.
+Wykonaj te kroki **raz**. Potem każdy `git push` na `master` automatycznie:
+1. uruchamia testy jednostkowe (gate),
+2. wdraża infrastrukturę bazową (`infra/base.bicep`),
+3. buduje i wypycha 5 obrazów do ACR,
+4. wdraża kontenery (`infra/apps.bicep`) do Azure Container Apps.
+
+> Architektura w Azure (wszystko w kontenerach):
+> `gateway` (Nginx, publiczny HTTPS) → `auth` / `categories` / `transactions` / `frontend`
+> (wewnętrzne), dane w **Azure Database for PostgreSQL Flexible Server** (prywatny, VNet).
 
 ## 1. Zaloguj się i utwórz Resource Group
 
@@ -12,83 +20,79 @@ az group create \
   --tags env=prod app=finance-tracker
 ```
 
-## 2. Utwórz App Registration + OIDC (bez sekretów w GH)
+## 2. App Registration + OIDC (logowanie z GitHub Actions bez sekretów)
 
 ```bash
-# Utwórz App Registration
 APP_ID=$(az ad app create --display-name "finance-tracker-github-oidc" --query appId -o tsv)
-SP_ID=$(az ad sp create --id $APP_ID --query id -o tsv)
+SP_ID=$(az ad sp create --id "$APP_ID" --query id -o tsv)
+SUB_ID=$(az account show --query id -o tsv)
 
-# Przypisz rolę Contributor na Resource Group
+# Contributor na Resource Group (wystarcza — obrazy ciągniemy po haśle ACR,
+# więc NIE są potrzebne uprawnienia do przypisywania ról).
 az role assignment create \
-  --assignee $SP_ID \
+  --assignee "$SP_ID" \
   --role Contributor \
-  --scope /subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-finance-tracker-prod
+  --scope "/subscriptions/$SUB_ID/resourceGroups/rg-finance-tracker-prod"
 
-# Dodaj federated credential dla GitHub Actions
+# WAŻNE: subject MUSI pasować do realnego repozytorium i gałęzi.
 az ad app federated-credential create \
-  --id $APP_ID \
+  --id "$APP_ID" \
   --parameters '{
     "name": "github-master",
     "issuer": "https://token.actions.githubusercontent.com",
-    "subject": "repo:pjoter004/personal-finance-tracker:ref:refs/heads/master",
+    "subject": "repo:Peter-Ka-hub/personal-finance-tracker:ref:refs/heads/master",
     "audiences": ["api://AzureADTokenExchange"]
   }'
 
 echo "AZURE_CLIENT_ID=$APP_ID"
 echo "AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)"
-echo "AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID=$SUB_ID"
 ```
 
-## 3. Dodaj GitHub Secrets
+> Jeśli federated credential został wcześniej utworzony dla innego repo
+> (np. `pjoter004/...`), usuń go i utwórz ponownie z poprawnym `subject`,
+> inaczej `azure/login` w Actions zwróci błąd `AADSTS70021`.
 
-W repo → Settings → Secrets → Actions, dodaj:
+## 3. GitHub Secrets
 
-| Secret                    | Wartość                                         |
-| ------------------------- | ----------------------------------------------- |
-| `AZURE_CLIENT_ID`         | z kroku 2                                       |
-| `AZURE_TENANT_ID`         | z kroku 2                                       |
-| `AZURE_SUBSCRIPTION_ID`   | z kroku 2                                       |
-| `RESOURCE_GROUP`          | `rg-finance-tracker-prod`                       |
-| `ACR_NAME`                | `acrfinancetracker`                             |
-| `POSTGRES_ADMIN_PASSWORD` | silne hasło (min. 16 znaków)                    |
-| `REACT_APP_API_URL`       | `https://<gateway-fqdn>/api` (po deployu infra) |
-| `SWA_DEPLOY_TOKEN`        | z Azure Portal → Static Web App → Manage token  |
+Repo → Settings → Secrets and variables → Actions. Wymagane (i wystarczające):
 
-## 4. Uruchom infra workflow (pierwszy deploy)
+| Secret                    | Wartość                                  |
+| ------------------------- | ---------------------------------------- |
+| `AZURE_CLIENT_ID`         | z kroku 2                                |
+| `AZURE_TENANT_ID`         | z kroku 2                                |
+| `AZURE_SUBSCRIPTION_ID`   | z kroku 2                                |
+| `RESOURCE_GROUP`          | `rg-finance-tracker-prod`                |
+| `POSTGRES_ADMIN_PASSWORD` | silne hasło (min. 16 znaków, bez `@/`)   |
 
-```bash
-# Lub przez GitHub UI: Actions → Deploy Infrastructure → Run workflow → deploy
-az deployment group create \
-  --resource-group rg-finance-tracker-prod \
-  --template-file infra/main.bicep \
-  --parameters infra/main.bicepparam \
-  --parameters postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD"
-```
+> Sekrety `JWT_SECRET` i `INTERNAL_API_KEY` **nie są potrzebne** — są wyliczane
+> deterministycznie w `apps.bicep` (`guid(resourceGroup().id, ...)`), identyczne
+> dla wszystkich serwisów i stabilne między wdrożeniami. Pozostałości po starym
+> układzie (`ACR_NAME`, `REGISTRY_*`, `SWA_DEPLOY_TOKEN`, `REACT_APP_API_URL`,
+> `AZURE_APP_NAME`, `AZURE_WEBAPP_PUBLISH_PROFILE`) można usunąć.
 
-## 5. Wstrzyknij sekrety do Key Vault (po deployu infra)
+## 4. Pierwszy deploy
 
-```bash
-KV_NAME="kv-finance-tracker"
+Wypchnij na `master` albo uruchom ręcznie:
+`Actions → Deploy to Azure → Run workflow`.
 
-az keyvault secret set --vault-name $KV_NAME --name "DB-PASSWORD"       --value "$POSTGRES_ADMIN_PASSWORD"
-az keyvault secret set --vault-name $KV_NAME --name "JWT-SECRET"        --value "$(openssl rand -base64 48)"
-az keyvault secret set --vault-name $KV_NAME --name "INTERNAL-API-KEY"  --value "$(openssl rand -base64 32)"
-```
+Workflow `deploy.yml` sam, w odpowiedniej kolejności:
+- wdraża `base.bicep` (tworzy m.in. ACR i PostgreSQL),
+- loguje się do ACR poświadczeniami admina,
+- buduje i wypycha obrazy `auth`, `categories`, `transactions`, `gateway`, `frontend`,
+- wdraża `apps.bicep` (5 Container Apps) na obrazach z bieżącego SHA.
 
-## 6. Uruchom migracje DB (jednorazowo)
+Pierwsze wdrożenie trwa dłużej (provisioning PostgreSQL ~5–10 min).
 
-```bash
-# Wykonaj syncModels w serwisie auth (stworzy schematy auth/categories/transactions + tabele)
-az containerapp exec \
-  --name ca-auth \
-  --resource-group rg-finance-tracker-prod \
-  --command "node -e \"require('./src/config/db').connectDB()\""
-```
+## 5. Migracje bazy — automatyczne
 
-## 7. Skonfiguruj REACT_APP_API_URL
+Każdy serwis przy starcie wykonuje `connectDB()` → `createSchema(...)` +
+`sequelize.sync({ alter: true })`, więc schematy (`auth`, `categories`,
+`transactions`) i tabele tworzą się same. Brak ręcznego kroku migracji.
 
-Po deployu infra pobierz URL gatewaya i zaktualizuj GH Secret:
+## 6. Adres aplikacji
+
+Po wdrożeniu URL bramy pojawia się w podsumowaniu joba *Deploy* (oraz):
 
 ```bash
 az containerapp show \
@@ -97,5 +101,5 @@ az containerapp show \
   --query "properties.configuration.ingress.fqdn" -o tsv
 ```
 
-Ustaw `REACT_APP_API_URL=https://<powyższy-fqdn>/api` w GitHub Secrets,
-następnie uruchom ręcznie workflow `deploy-frontend.yml`.
+Otwórz `https://<fqdn>` — frontend i API (`/api/...`) są pod tym samym hostem
+(bez CORS), bo wszystko idzie przez bramę.
