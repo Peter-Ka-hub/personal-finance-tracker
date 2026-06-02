@@ -8,7 +8,7 @@
 // edge (gateway) is served over HTTPS by the platform.
 
 @description('Azure region for all resources')
-param location string = 'swedencentral'
+param location string = 'germanywestcentral'
 
 @description('Container Apps Environment resource ID (from base.bicep)')
 param environmentId string
