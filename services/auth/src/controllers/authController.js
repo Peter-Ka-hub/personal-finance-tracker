@@ -40,6 +40,10 @@ const seedCategories = async (userId) => {
           'Content-Length': Buffer.byteLength(body),
           'X-Internal-Key': process.env.INTERNAL_API_KEY || '',
         },
+        // Azure Container Apps' internal ingress uses a platform-managed cert
+        // that isn't in Node's trust store; skip verification for this internal
+        // service-to-service call (traffic stays inside the environment).
+        rejectUnauthorized: false,
       },
       (res) => {
         res.resume();

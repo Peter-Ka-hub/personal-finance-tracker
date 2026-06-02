@@ -119,7 +119,7 @@ module caAuth 'modules/containerapp.bicep' = {
     acrPassword: acrPassword
     envVars: concat(dbEnvVars, [
       { name: 'PORT', value: '3001' }
-      { name: 'CATEGORIES_SERVICE_URL', value: 'http://${caCategories.outputs.appFqdn}' }
+      { name: 'CATEGORIES_SERVICE_URL', value: 'https://${caCategories.outputs.appFqdn}' }
       { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
     ])
     secretRefs: secretsWithInternalKey
@@ -183,16 +183,18 @@ module caGateway 'modules/containerapp.bicep' = {
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword
-    // Upstreams point at the internal FQDNs on port 80 (allowInsecure http).
+    // Container Apps' internal ingress requires HTTPS, so the gateway talks to
+    // the services over https on 443 (internal FQDNs).
     envVars: [
+      { name: 'UPSTREAM_SCHEME',   value: 'https' }
       { name: 'AUTH_HOST',         value: caAuth.outputs.appFqdn }
-      { name: 'AUTH_PORT',         value: '80' }
+      { name: 'AUTH_PORT',         value: '443' }
       { name: 'CATEGORIES_HOST',   value: caCategories.outputs.appFqdn }
-      { name: 'CATEGORIES_PORT',   value: '80' }
+      { name: 'CATEGORIES_PORT',   value: '443' }
       { name: 'TRANSACTIONS_HOST', value: caTransactions.outputs.appFqdn }
-      { name: 'TRANSACTIONS_PORT', value: '80' }
+      { name: 'TRANSACTIONS_PORT', value: '443' }
       { name: 'FRONTEND_HOST',     value: caFrontend.outputs.appFqdn }
-      { name: 'FRONTEND_PORT',     value: '80' }
+      { name: 'FRONTEND_PORT',     value: '443' }
     ]
     secretRefs: []
   }
