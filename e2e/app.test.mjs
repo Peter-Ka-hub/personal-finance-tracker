@@ -17,23 +17,46 @@ let categoryId;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function waitForHealth(timeoutMs = 150000) {
+// Wait until the gateway AND every upstream service is actually serving — not
+// just the gateway's own /health (which nginx answers without touching any
+// upstream). An upstream that is still starting returns 502/503/504, so we wait
+// until each probe returns a real application status (< 500).
+async function waitForReady(timeoutMs = 240000) {
+  const probes = [
+    { method: 'GET', path: '/health' },
+    { method: 'GET', path: '/api/categories' }, // 401 when categories is up
+    { method: 'GET', path: '/api/transactions' }, // 401 when transactions is up
+    { method: 'POST', path: '/api/auth/login', body: { username: '_probe_', password: '_probe_' } }, // 400 when auth is up
+  ];
   const deadline = Date.now() + timeoutMs;
-  let lastErr;
-  while (Date.now() < deadline) {
-    try {
-      const r = await fetch(`${BASE}/health`);
-      if (r.ok) return;
-    } catch (e) {
-      lastErr = e;
+  for (const probe of probes) {
+    let last;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${BASE}${probe.path}`, {
+          method: probe.method,
+          headers: probe.body ? { 'Content-Type': 'application/json' } : undefined,
+          body: probe.body ? JSON.stringify(probe.body) : undefined,
+        });
+        last = res.status;
+        if (res.status < 500) {
+          ready = true;
+          break;
+        }
+      } catch (e) {
+        last = e.message;
+      }
+      await sleep(2000);
     }
-    await sleep(2000);
+    if (!ready) {
+      throw new Error(`Service not ready for ${probe.method} ${probe.path} (last: ${last})`);
+    }
   }
-  throw new Error(`Gateway /health not ready in time: ${lastErr ?? 'unknown'}`);
 }
 
 before(async () => {
-  await waitForHealth();
+  await waitForReady();
 });
 
 test('register creates a user and returns a JWT', async () => {
