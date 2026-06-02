@@ -4,12 +4,6 @@ param location string
 @description('Tags to apply to all resources')
 param tags object
 
-@description('Subnet ID for Postgres flexible server VNet integration')
-param dbSubnetId string
-
-@description('VNet ID to link the private DNS zone to (for name resolution)')
-param vnetId string
-
 @secure()
 @description('Administrator password')
 param adminPassword string
@@ -17,33 +11,12 @@ param adminPassword string
 @description('Administrator login name')
 param adminLogin string = 'pgadmin'
 
-var serverName = 'psql-finance-tracker'
+var serverName = 'psql-finance-tracker-pc'
 
-resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: '${serverName}.private.postgres.database.azure.com'
-  location: 'global'
-  tags: tags
-}
-
-// Link the private DNS zone to the VNet so resources in it (Container Apps)
-// can resolve the server's private FQDN.
-resource dnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: privateDnsZone
-  name: 'link-to-vnet'
-  location: 'global'
-  tags: tags
-  properties: {
-    registrationEnabled: false
-    virtualNetwork: {
-      id: vnetId
-    }
-  }
-}
-
+// Public-access flexible server (the reused Container Apps Environment is not
+// VNet-integrated). Access is restricted by firewall to Azure services and all
+// traffic is TLS-encrypted (services connect with DB_SSL=true).
 resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
-  dependsOn: [
-    dnsVnetLink
-  ]
   name: serverName
   location: location
   tags: tags
@@ -66,9 +39,19 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-pr
     }
     version: '16'
     network: {
-      delegatedSubnetResourceId: dbSubnetId
-      privateDnsZoneArmResourceId: privateDnsZone.id
+      publicNetworkAccess: 'Enabled'
     }
+  }
+}
+
+// Allow connections from Azure services (Container Apps outbound). The special
+// 0.0.0.0 range means "Allow public access from any Azure service".
+resource allowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-06-01-preview' = {
+  parent: postgresServer
+  name: 'AllowAllAzureServices'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
   }
 }
 
