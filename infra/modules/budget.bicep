@@ -4,6 +4,9 @@ param budgetAmountEur int = 25
 @description('Email address for budget alerts')
 param alertEmail string
 
+@description('Budget start date — must be the first of a month, not before the current month')
+param budgetStartDate string = utcNow('yyyy-MM-01')
+
 var budgetName = 'budget-finance-tracker-monthly'
 
 resource budget 'Microsoft.Consumption/budgets@2023-05-01' = {
@@ -13,7 +16,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-05-01' = {
     amount: budgetAmountEur
     timeGrain: 'Monthly'
     timePeriod: {
-      startDate: '2025-01-01'
+      startDate: budgetStartDate
     }
     notifications: {
       actual80Percent: {

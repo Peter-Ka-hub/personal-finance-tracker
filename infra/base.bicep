@@ -6,7 +6,7 @@
 // images have been built and pushed to the registry created here.
 
 @description('Azure region for all resources')
-param location string = 'polandcentral'
+param location string = 'swedencentral'
 
 @description('Alert email for budget notifications')
 param alertEmail string = 'pjoter004@outlook.com'
