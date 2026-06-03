@@ -1,0 +1,172 @@
+openapi: 3.0.3
+info:
+  title: Personal Finance Tracker API
+  version: 1.0.0
+  description: >
+    REST API exposed through the Nginx gateway under the `/api` prefix.
+    Backed by three microservices: auth, categories and transactions.
+  license:
+    name: MIT
+servers:
+  - url: https://ca-gateway.wonderfulsand-f41bf9c3.polandcentral.azurecontainerapps.io
+    description: Live demo (Azure Container Apps)
+  - url: http://localhost
+    description: Local docker-compose
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuthCredentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 50, example: alice }
+        password: { type: string, minLength: 8, example: secret123 }
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string, description: JWT (HS256), valid 7 days }
+        username: { type: string }
+    Category:
+      type: object
+      required: [name, type]
+      properties:
+        id: { type: string, readOnly: true }
+        name: { type: string, maxLength: 50, example: Jedzenie }
+        type: { type: string, enum: [income, expense] }
+        color: { type: string, example: "#EF4444" }
+        icon: { type: string, example: pizza }
+    Transaction:
+      type: object
+      required: [type, amount, categoryId, description, date]
+      properties:
+        id: { type: string, readOnly: true }
+        type: { type: string, enum: [income, expense] }
+        amount: { type: number, format: float, minimum: 0, example: 42.5 }
+        categoryId: { type: string }
+        description: { type: string, maxLength: 255, example: Lunch }
+        date: { type: string, format: date, example: "2026-06-02" }
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user (also seeds 10 default categories)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthCredentials' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { description: Validation error or username taken, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Too many requests (rate limited) }
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Log in and receive a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthCredentials' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { description: Invalid credentials }
+        '429': { description: Too many requests (rate limited) }
+
+  /api/categories:
+    get:
+      tags: [categories]
+      summary: List the authenticated user's categories
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        '401': { description: Missing or invalid token }
+    post:
+      tags: [categories]
+      summary: Create a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Category' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Category' } } } }
+        '400': { description: Validation error }
+        '401': { description: Missing or invalid token }
+  /api/categories/{id}:
+    delete:
+      tags: [categories]
+      summary: Delete an owned category
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Deleted }
+        '401': { description: Missing or invalid token }
+        '404': { description: Not found / not owned }
+
+  /api/transactions:
+    get:
+      tags: [transactions]
+      summary: List the authenticated user's transactions
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+        '401': { description: Missing or invalid token }
+    post:
+      tags: [transactions]
+      summary: Create a transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Transaction' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Transaction' } } } }
+        '400': { description: Validation error }
+        '401': { description: Missing or invalid token }
+  /api/transactions/{id}:
+    delete:
+      tags: [transactions]
+      summary: Delete an owned transaction
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Deleted }
+        '401': { description: Missing or invalid token }
+        '404': { description: Not found / not owned }

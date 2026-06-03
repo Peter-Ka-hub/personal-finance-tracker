@@ -42,6 +42,12 @@ describe('category-service', () => {
     expect(res.status).toBe(400);
   });
 
+  test('POST /api/categories rejects an invalid type', async () => {
+    const res = await auth(request(app).post('/api/categories')).send({ name: 'X', type: 'bogus' });
+    expect(res.status).toBe(400);
+    expect(Category.create).not.toHaveBeenCalled();
+  });
+
   test('DELETE /api/categories/:id removes an owned category', async () => {
     const destroy = jest.fn().mockResolvedValue();
     Category.findOne.mockResolvedValue({ id: 'c1', destroy });

@@ -43,6 +43,14 @@ describe('auth-service', () => {
     expect(res.status).toBe(400);
   });
 
+  test('register rejects a too-short password', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'charlie', password: 'short' });
+    expect(res.status).toBe(400);
+    expect(User.create).not.toHaveBeenCalled();
+  });
+
   test('register rejects an existing username', async () => {
     User.findOne.mockResolvedValue({ id: 'x', username: 'alice' });
     const res = await request(app)

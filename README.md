@@ -1,5 +1,15 @@
 # Personal Finance Tracker
 
+[![CI](https://github.com/Peter-Ka-hub/personal-finance-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Peter-Ka-hub/personal-finance-tracker/actions/workflows/ci.yml)
+![Node](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4?logo=microsoftazure&logoColor=white)
+
+**🔗 Live demo:** https://ca-gateway.wonderfulsand-f41bf9c3.polandcentral.azurecontainerapps.io
+&nbsp;·&nbsp; **📘 API:** [docs/openapi.yaml](docs/openapi.yaml)
+&nbsp;·&nbsp; **🛠️ Dziennik problemów:** [docs/PROBLEMY-I-ROZWIAZANIA.md](docs/PROBLEMY-I-ROZWIAZANIA.md)
+
 Aplikacja do śledzenia finansów osobistych: rejestracja/logowanie, kategorie przychodów
 i wydatków, dodawanie i przeglądanie transakcji oraz wykresy. Zbudowana jako **architektura
 mikroserwisowa** (React + 3 serwisy Node/Express + brama Nginx + PostgreSQL), z pełnym
@@ -122,7 +132,8 @@ node --test e2e/app.test.mjs
 ## Czego ten projekt dowodzi
 
 - Projektowanie i migracja do **architektury mikroserwisowej** z bramą API.
-- Bezpieczeństwo: hasła hashowane bcrypt, autoryzacja JWT, sekrety poza kodem, ruch wewnętrzny
+- Bezpieczeństwo: hasła hashowane bcrypt, autoryzacja JWT, walidacja wejścia (Zod), nagłówki
+  bezpieczeństwa (Helmet), rate limiting na endpointach auth, sekrety poza kodem, ruch wewnętrzny
   chroniony osobnym kluczem.
 - **Pełna automatyzacja**: testy jednostkowe + e2e w CI, IaC w Bicep, wdrożenie na Azure przez OIDC.
 - **Debugowanie produkcyjne**: 21 udokumentowanych, realnych problemów (HTTP 426 na bramie,

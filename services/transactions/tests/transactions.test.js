@@ -43,6 +43,22 @@ describe('transaction-service', () => {
     expect(res.status).toBe(400);
   });
 
+  test('rejects an invalid transaction type', async () => {
+    const res = await auth(request(app).post('/api/transactions')).send({
+      type: 'bogus', amount: 10, categoryId: 'c1', description: 'x', date: '2026-06-02',
+    });
+    expect(res.status).toBe(400);
+    expect(Transaction.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects a non-positive amount', async () => {
+    const res = await auth(request(app).post('/api/transactions')).send({
+      type: 'expense', amount: -5, categoryId: 'c1', description: 'x', date: '2026-06-02',
+    });
+    expect(res.status).toBe(400);
+    expect(Transaction.create).not.toHaveBeenCalled();
+  });
+
   test('deletes an owned transaction', async () => {
     const destroy = jest.fn().mockResolvedValue();
     Transaction.findOne.mockResolvedValue({ id: 't1', destroy });
