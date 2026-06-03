@@ -1,70 +1,132 @@
-# Getting Started with Create React App
+# Personal Finance Tracker
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Aplikacja do śledzenia finansów osobistych: rejestracja/logowanie, kategorie przychodów
+i wydatków, dodawanie i przeglądanie transakcji oraz wykresy. Zbudowana jako **architektura
+mikroserwisowa** (React + 3 serwisy Node/Express + brama Nginx + PostgreSQL), z pełnym
+potokiem **CI/CD** i **Infrastructure as Code** (Bicep), wdrażana na **Azure Container Apps**.
 
-## Available Scripts
+> Projekt portfolio. Punktem wyjścia był monolit CRUD; został przemigrowany do mikrousług,
+> uzupełniony o testy, konteneryzację i automatyczne wdrożenie. Pełny dziennik realnych problemów
+> napotkanych aż do produkcji znajduje się w [docs/PROBLEMY-I-ROZWIAZANIA.md](docs/PROBLEMY-I-ROZWIAZANIA.md).
 
-In the project directory, you can run:
+## Stack technologiczny
 
-### `npm start`
+| Warstwa            | Technologie |
+|--------------------|-------------|
+| Frontend           | React 19, React Router 7, React Query, Recharts, Tailwind CSS, Axios |
+| Backend (×3)       | Node.js, Express 5, Sequelize, JWT, bcrypt |
+| Brama / routing    | Nginx (reverse proxy) |
+| Baza danych        | PostgreSQL 16 |
+| Testy              | Jest + Supertest (unit), Node test runner (e2e) |
+| Konteneryzacja     | Docker, docker-compose |
+| CI/CD              | GitHub Actions |
+| Chmura / IaC       | Azure Container Apps, Azure PostgreSQL, Bicep |
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Architektura
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```mermaid
+flowchart TD
+    Browser["Przeglądarka"] -->|HTTPS| GW["Brama Nginx<br/>(jedyny publiczny endpoint)"]
+    GW -->|"/"| FE["Frontend<br/>React (statyczny build)"]
+    GW -->|"/api/auth"| AUTH["Auth Service :3001"]
+    GW -->|"/api/categories"| CAT["Categories Service :3002"]
+    GW -->|"/api/transactions"| TX["Transactions Service :3003"]
+    AUTH -->|"seed (X-Internal-Key)"| CAT
+    AUTH --> DB[("PostgreSQL")]
+    CAT --> DB
+    TX --> DB
+```
 
-### `npm test`
+- **Brama Nginx** to jedyny publiczny punkt wejścia — frontend i serwisy są wewnętrzne.
+  Frontend woła API relatywnie pod `/api`, więc **nie ma problemu z CORS**.
+- **Auth** wystawia JWT (HS256); pozostałe serwisy weryfikują token middlewarem.
+- Po rejestracji Auth woła Categories i **zasiewa 10 domyślnych kategorii** dla użytkownika —
+  to wywołanie wewnętrzne, chronione nagłówkiem `X-Internal-Key`, a nie JWT użytkownika.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## API (przez bramę, prefiks `/api`)
 
-### `npm run build`
+| Metoda | Ścieżka                  | Auth        | Opis |
+|--------|--------------------------|-------------|------|
+| POST   | `/api/auth/register`     | —           | Rejestracja; zwraca JWT i zasiewa kategorie |
+| POST   | `/api/auth/login`        | —           | Logowanie; zwraca JWT |
+| GET    | `/api/categories`        | JWT         | Lista kategorii użytkownika |
+| POST   | `/api/categories`        | JWT         | Dodanie kategorii |
+| DELETE | `/api/categories/:id`    | JWT         | Usunięcie kategorii |
+| POST   | `/api/categories/seed`   | `X-Internal-Key` | Zasiew domyślnych kategorii (wewnętrzny) |
+| GET    | `/api/transactions`      | JWT         | Lista transakcji użytkownika |
+| POST   | `/api/transactions`      | JWT         | Dodanie transakcji |
+| DELETE | `/api/transactions/:id`  | JWT         | Usunięcie transakcji |
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Każdy serwis wystawia też `GET /health`.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Uruchomienie lokalne
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Wymagania: Docker + docker-compose.
 
-### `npm run eject`
+```bash
+# 1. Skonfiguruj zmienne środowiskowe
+cp .env.example .env        # następnie uzupełnij hasła/sekrety
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+# 2. Zbuduj i uruchom cały stack
+docker compose up --build
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+# 3. Otwórz aplikację
+#    http://localhost  (brama na porcie 80)
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Zmienne środowiskowe (`.env`) — wszystkie sekrety pochodzą stąd, nic nie jest zaszyte w kodzie:
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+| Zmienna            | Opis |
+|--------------------|------|
+| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Dane logowania PostgreSQL |
+| `JWT_SECRET`       | Sekret do podpisu JWT (min. 32 znaki) |
+| `INTERNAL_API_KEY` | Klucz wywołań wewnętrznych (auth → categories) |
 
-## Learn More
+## Testy
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```bash
+# Testy jednostkowe danego serwisu (baza mockowana)
+cd services/auth && npm ci && npm test          # auth / categories / transactions
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+# Testy frontendu
+cd frontend && npm ci && npm test -- --watchAll=false
 
-### Code Splitting
+# Testy e2e przez bramę (wymaga uruchomionego docker-compose)
+node --test e2e/app.test.mjs
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## CI/CD
 
-### Analyzing the Bundle Size
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — przy każdym PR/push: testy jednostkowe
+  (matryca 3 serwisów), build + testy frontendu, testy **e2e** na świeżo postawionym docker-compose.
+- [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — wdrożenie na Azure dopiero po
+  zielonych testach: `base.bicep` (ACR, PostgreSQL) → build i push 5 obrazów → `apps.bicep`
+  (5 Container Apps). Logowanie do Azure przez **OIDC** (bez długożyciowych sekretów).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+## Struktura repozytorium
 
-### Making a Progressive Web App
+```
+.
+├── frontend/            # Aplikacja React (CRA + Tailwind)
+├── services/
+│   ├── auth/            # Rejestracja, logowanie, wydawanie JWT
+│   ├── categories/      # Kategorie + zasiew domyślnych
+│   └── transactions/    # CRUD transakcji
+├── gateway/             # Brama Nginx (reverse proxy)
+├── infra/               # Bicep (base.bicep, apps.bicep, modules/)
+├── e2e/                 # Testy end-to-end przez bramę
+├── docs/                # Dziennik problemów i rozwiązań
+└── docker-compose.yml   # Lokalny stack
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Czego ten projekt dowodzi
 
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+- Projektowanie i migracja do **architektury mikroserwisowej** z bramą API.
+- Bezpieczeństwo: hasła hashowane bcrypt, autoryzacja JWT, sekrety poza kodem, ruch wewnętrzny
+  chroniony osobnym kluczem.
+- **Pełna automatyzacja**: testy jednostkowe + e2e w CI, IaC w Bicep, wdrożenie na Azure przez OIDC.
+- **Debugowanie produkcyjne**: 21 udokumentowanych, realnych problemów (HTTP 426 na bramie,
+  globalne limity Azure, wyścigi startowe w CI, OIDC) — zob.
+  [docs/PROBLEMY-I-ROZWIAZANIA.md](docs/PROBLEMY-I-ROZWIAZANIA.md).
+</content>
+</invoke>
