@@ -7,6 +7,9 @@ info:
     Backed by three microservices: auth, categories and transactions.
   license:
     name: MIT
+  contact:
+    name: Peter-Ka-hub
+    url: https://github.com/Peter-Ka-hub/personal-finance-tracker
 servers:
   - url: https://ca-gateway.wonderfulsand-f41bf9c3.polandcentral.azurecontainerapps.io
     description: Live demo (Azure Container Apps)

@@ -1,5 +1,6 @@
 # Normalize line endings: store LF in the repo, check out native on Windows.
 * text=auto eol=lf
+*.md text eol=lf
 
 # Treat these as binary (no EOL conversion / diffing).
 *.png binary

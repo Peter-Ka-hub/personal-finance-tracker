@@ -292,3 +292,7 @@ a `deploy.yml` buduje 5 obrazów i wdraża je do Azure Container Apps. Aplikacja
    ta sama konfiguracja musi działać w obu światach.
 5. Uprawnienia konta wdrożeniowego (Contributor vs Owner) wymuszają wybór wzorca (hasło ACR
    zamiast przypisań ról).
+
+---
+
+Powiązane: [openapi.yaml](openapi.yaml) (kontrakt API), [README.md](../README.md) (architektura i uruchomienie).

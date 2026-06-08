@@ -139,5 +139,3 @@ node --test e2e/app.test.mjs
 - **Debugowanie produkcyjne**: 21 udokumentowanych, realnych problemów (HTTP 426 na bramie,
   globalne limity Azure, wyścigi startowe w CI, OIDC) — zob.
   [docs/PROBLEMY-I-ROZWIAZANIA.md](docs/PROBLEMY-I-ROZWIAZANIA.md).
-</content>
-</invoke>

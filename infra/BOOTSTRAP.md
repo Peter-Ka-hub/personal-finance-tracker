@@ -103,3 +103,5 @@ az containerapp show \
 
 Otwórz `https://<fqdn>` — frontend i API (`/api/...`) są pod tym samym hostem
 (bez CORS), bo wszystko idzie przez bramę.
+
+> Szczegóły endpointów API: [docs/openapi.yaml](../docs/openapi.yaml).

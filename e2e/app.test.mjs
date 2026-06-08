@@ -1,6 +1,7 @@
 // End-to-end test exercising the full stack through the Nginx gateway.
 // Requires the docker-compose stack to be running (see docker-compose.yml).
 // Run with:  node --test e2e/app.test.mjs
+// Override base URL:  E2E_BASE_URL=http://localhost node --test e2e/app.test.mjs
 //
 // Flow: register -> default categories auto-seeded -> create & list a
 // transaction -> login. Uses the public gateway only (no direct service ports).
