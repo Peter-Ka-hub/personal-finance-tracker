@@ -5,6 +5,12 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Only one deploy at a time per branch — avoids ARM DeploymentConflict when
+# two pushes trigger overlapping base.bicep / apps.bicep runs.
+concurrency:
+  group: deploy-azure-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
