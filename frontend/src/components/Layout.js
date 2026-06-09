@@ -12,7 +12,7 @@ export default function Layout({ onLogout }) {
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-blue-600 font-bold text-xl hover:text-blue-700 transition-colors">
             <Wallet size={24} />
-            <span>Finance Trackerr</span>
+            <span>Finance Track</span>
           </Link>
           <div className="flex items-center gap-2 sm:gap-6">
             <Link 
