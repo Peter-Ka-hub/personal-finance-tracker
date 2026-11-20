@@ -31,8 +31,9 @@ param maxReplicas int = 3
 @description('Environment variables for the container')
 param envVars array = []
 
-@description('Container secrets ({ name, value } entries)')
-param secretRefs array = []
+@secure()
+@description('Application secret names and values')
+param appSecrets object = {}
 
 @description('ACR login server')
 param acrLoginServer string
@@ -43,6 +44,11 @@ param acrUsername string
 @secure()
 @description('ACR admin password (used to pull the image)')
 param acrPassword string
+
+var applicationSecrets = [for secret in items(appSecrets): {
+  name: secret.key
+  value: secret.value
+}]
 
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: appName
@@ -64,7 +70,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           passwordSecretRef: 'acr-registry-password'
         }
       ]
-      secrets: concat(secretRefs, [
+      secrets: concat(applicationSecrets, [
         {
           name: 'acr-registry-password'
           value: acrPassword

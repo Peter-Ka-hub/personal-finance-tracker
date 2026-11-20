@@ -60,6 +60,17 @@ before(async () => {
   await waitForReady();
 });
 
+test('the public gateway blocks category initialization', async () => {
+  for (const path of ['/api/categories/seed', '/api/categories/seed/', '/api/categories/SEED']) {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 404, path);
+  }
+});
+
 test('register creates a user and returns a JWT', async () => {
   const res = await fetch(`${BASE}/api/auth/register`, {
     method: 'POST',
@@ -74,19 +85,25 @@ test('register creates a user and returns a JWT', async () => {
 });
 
 test('default categories are seeded for the new user', async () => {
-  // Seeding is an async auth -> categories call; allow a short retry window.
-  let categories = [];
-  for (let i = 0; i < 15; i++) {
-    const res = await fetch(`${BASE}/api/categories`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    assert.equal(res.status, 200);
-    categories = await res.json();
-    if (categories.length > 0) break;
-    await sleep(1000);
-  }
-  assert.ok(categories.length > 0, 'expected default categories to be seeded');
-  categoryId = categories[0].id;
+  const res = await fetch(`${BASE}/api/categories`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const categories = await res.json();
+  assert.equal(categories.length, 10, 'expected one set of default categories');
+  categoryId = categories.find((category) => category.type === 'expense')?.id;
+  assert.ok(categoryId, 'expected a default expense category');
+});
+
+test('the public gateway still allows creating a category', async () => {
+  const res = await fetch(`${BASE}/api/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name: 'E2E category', type: 'expense' }),
+  });
+  assert.equal(res.status, 201);
+  const category = await res.json();
+  assert.equal(category.name, 'E2E category');
 });
 
 test('create and list a transaction (data is persisted)', async () => {
