@@ -28,12 +28,21 @@ param postgresHost string
 @description('PostgreSQL database name (from base.bicep)')
 param postgresDbName string
 
-@description('PostgreSQL admin login (from base.bicep)')
-param postgresAdminLogin string
+@secure()
+@description('PostgreSQL password for finance_auth')
+param postgresAuthPassword string
 
 @secure()
-@description('PostgreSQL administrator password')
-param postgresAdminPassword string
+@description('PostgreSQL password for finance_categories')
+param postgresCategoriesPassword string
+
+@secure()
+@description('PostgreSQL password for finance_transactions')
+param postgresTransactionsPassword string
+
+@secure()
+@description('Optional original DB password retained under its old name during the revision transition')
+param legacyPostgresAdminPassword string = ''
 
 @secure()
 @description('JWT signing key shared by auth, categories and transactions')
@@ -67,16 +76,16 @@ var dbEnvVars = [
   { name: 'DB_HOST', value: postgresHost }
   { name: 'DB_PORT', value: '5432' }
   { name: 'DB_NAME', value: postgresDbName }
-  { name: 'DB_USER', value: postgresAdminLogin }
   { name: 'DB_SSL', value: 'true' }
-  { name: 'DB_PASSWORD', secretRef: 'db-password' }
+  { name: 'DB_PASSWORD', secretRef: 'runtime-db-password' }
   { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
 ]
 
-var commonSecrets = {
-  'db-password': postgresAdminPassword
+var commonSecrets = union({
   'jwt-secret': jwtSecret
-}
+}, empty(legacyPostgresAdminPassword) ? {} : {
+  'db-password': legacyPostgresAdminPassword
+})
 
 var secretsWithInternalKey = union(commonSecrets, {
   'internal-api-key': internalApiKey
@@ -99,9 +108,10 @@ module caCategories 'modules/containerapp.bicep' = {
     acrPassword: acrPassword
     envVars: concat(dbEnvVars, [
       { name: 'PORT', value: '3002' }
+      { name: 'DB_USER', value: 'finance_categories' }
       { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
     ])
-    appSecrets: secretsWithInternalKey
+    appSecrets: union(secretsWithInternalKey, { 'runtime-db-password': postgresCategoriesPassword })
   }
 }
 
@@ -122,10 +132,11 @@ module caAuth 'modules/containerapp.bicep' = {
     acrPassword: acrPassword
     envVars: concat(dbEnvVars, [
       { name: 'PORT', value: '3001' }
+      { name: 'DB_USER', value: 'finance_auth' }
       { name: 'CATEGORIES_SERVICE_URL', value: 'https://${caCategories.outputs.appFqdn}' }
       { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
     ])
-    appSecrets: secretsWithInternalKey
+    appSecrets: union(secretsWithInternalKey, { 'runtime-db-password': postgresAuthPassword })
   }
 }
 
@@ -146,8 +157,9 @@ module caTransactions 'modules/containerapp.bicep' = {
     acrPassword: acrPassword
     envVars: concat(dbEnvVars, [
       { name: 'PORT', value: '3003' }
+      { name: 'DB_USER', value: 'finance_transactions' }
     ])
-    appSecrets: commonSecrets
+    appSecrets: union(commonSecrets, { 'runtime-db-password': postgresTransactionsPassword })
   }
 }
 

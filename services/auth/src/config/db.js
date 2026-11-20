@@ -21,9 +21,6 @@ const connectDB = async () => {
   try {
     await sequelize.authenticate();
     console.log('[auth-service] Połączono z bazą danych PostgreSQL');
-    await sequelize.createSchema('auth', { ifNotExists: true });
-    await sequelize.sync({ alter: true });
-    console.log('[auth-service] Tabele zsynchronizowane');
   } catch (error) {
     console.error('[auth-service] Błąd połączenia z bazą danych:', error);
     process.exit(1);

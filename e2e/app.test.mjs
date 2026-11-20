@@ -160,6 +160,16 @@ const addExpense = (categoryId, jwt = token, type = 'expense') => request('/api/
   body: { type, categoryId, amount: 42.5, date: '2028-02-29', description: 'E2E category check' },
 });
 
+test('the transactions role can delete an owned transaction', async () => {
+  const created = await addExpense(categoryId);
+  assert.equal(created.status, 201);
+  const { id } = await created.json();
+  const deleted = await request(`/api/transactions/${id}`, token, { method: 'DELETE' });
+  assert.equal(deleted.status, 200);
+  const transactions = await (await request('/api/transactions', token)).json();
+  assert.ok(!transactions.some((transaction) => transaction.id === id));
+});
+
 test('archives categories, retains labels, and rejects categories unavailable to a second account', async () => {
   const other = await request('/api/auth/register', token, { body: { username: `${username}_2`, password } });
   assert.equal(other.status, 201);
@@ -261,6 +271,11 @@ test('PostgreSQL serializes archiving with inserts and keeps legacy orphaned tra
     assert.equal((await postAfterArchive).status, 400);
 
     const { rows: [owner] } = await db.query('SELECT id FROM auth."Users" WHERE username = $1', [username]);
+    const { rows: [pendingSeed] } = await db.query(
+      'SELECT EXISTS (SELECT 1 FROM auth."PendingCategorySeeds" WHERE "userId" = $1) AS pending',
+      [owner.id]
+    );
+    assert.equal(pendingSeed.pending, false, 'Auth should clear the pending seed after success');
     const orphanId = randomUUID();
     const missingCategory = randomUUID();
     await db.query(`

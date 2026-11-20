@@ -51,6 +51,10 @@ jobs:
           DB_PASSWORD=ci_test_password_123
           DB_NAME=financedb
           DB_SSL=false
+          POSTGRES_MIGRATOR_PASSWORD=ci_test_migrator_password
+          POSTGRES_AUTH_PASSWORD=ci_test_auth_db_password
+          POSTGRES_CATEGORIES_PASSWORD=ci_test_categories_db_password
+          POSTGRES_TRANSACTIONS_PASSWORD=ci_test_transactions_db_password
           JWT_SECRET=ci_jwt_secret_min_32_chars_aaaaaaaaaaaa
           INTERNAL_API_KEY=ci_internal_api_key_min_32_chars_bbbb
           EOF
@@ -58,6 +62,8 @@ jobs:
         run: docker compose up -d --build
       - name: Run e2e tests
         run: node --test e2e/app.test.mjs
+      - name: Test PostgreSQL migrations and roles
+        run: bash db/test-migrations.sh
       - name: Dump container logs on failure
         if: failure()
         run: docker compose logs --no-color | tail -n 300
@@ -69,6 +75,7 @@ jobs:
   deploy:
     name: Build & deploy to Azure Container Apps
     needs: [test, e2e]
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,11 +87,17 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_MIGRATOR_PASSWORD: ${{ secrets.POSTGRES_MIGRATOR_PASSWORD }}
+          POSTGRES_AUTH_PASSWORD: ${{ secrets.POSTGRES_AUTH_PASSWORD }}
+          POSTGRES_CATEGORIES_PASSWORD: ${{ secrets.POSTGRES_CATEGORIES_PASSWORD }}
+          POSTGRES_TRANSACTIONS_PASSWORD: ${{ secrets.POSTGRES_TRANSACTIONS_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
           missing=0
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID RESOURCE_GROUP POSTGRES_ADMIN_PASSWORD JWT_SECRET INTERNAL_API_KEY; do
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID RESOURCE_GROUP \
+            POSTGRES_ADMIN_PASSWORD POSTGRES_MIGRATOR_PASSWORD POSTGRES_AUTH_PASSWORD \
+            POSTGRES_CATEGORIES_PASSWORD POSTGRES_TRANSACTIONS_PASSWORD JWT_SECRET INTERNAL_API_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing GitHub Actions secret: $name"
               missing=1
@@ -98,6 +111,28 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check the legacy database secret transition
+        env:
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          RETAIN_LEGACY_DB_SECRET: ${{ vars.RETAIN_LEGACY_DB_SECRET }}
+        run: |
+          case "$RETAIN_LEGACY_DB_SECRET" in
+            true) exit 0 ;;
+            ''|false) ;;
+            *) echo "::error::RETAIN_LEGACY_DB_SECRET must be true or false"; exit 1 ;;
+          esac
+          apps=$(az containerapp list --resource-group "$RESOURCE_GROUP" \
+            --query "[?name=='ca-auth' || name=='ca-categories' || name=='ca-transactions'].name" -o tsv)
+          for app in $apps; do
+            revisions=$(az containerapp revision list --name "$app" --resource-group "$RESOURCE_GROUP" -o json)
+            legacy_in_use=$(jq 'any(.[] | select(.properties.active == true) | .properties.template.containers[]?.env[]?;
+              .name == "DB_PASSWORD" and .secretRef == "db-password")' <<<"$revisions")
+            if [[ "$legacy_in_use" == true ]]; then
+              echo "::error::$app has an active revision using db-password. Set RETAIN_LEGACY_DB_SECRET=true before deploying."
+              exit 1
+            fi
+          done
 
       # 1. Base infra (VNet, ACR, Postgres, Container Apps Env). Creates the ACR
       #    we push to in the next step. Idempotent on re-runs.
@@ -126,7 +161,6 @@ jobs:
             echo "environmentId=$(jq -r .environmentId.value base_outputs.json)"
             echo "postgresHost=$(jq -r .postgresHost.value base_outputs.json)"
             echo "postgresDbName=$(jq -r .postgresDbName.value base_outputs.json)"
-            echo "postgresAdminLogin=$(jq -r .postgresAdminLogin.value base_outputs.json)"
           } >> "$GITHUB_OUTPUT"
 
       # 2. Log in to ACR using its admin credentials (admin user enabled in
@@ -139,7 +173,7 @@ jobs:
           printf '::add-mask::%s\n' "$ACR_PW"
           printf '%s\n' "$ACR_PW" | docker login "${{ steps.base.outputs.acrLoginServer }}" -u "$ACR_USER" --password-stdin
 
-      # 3. Build and push all five images, tagged with the commit SHA.
+      # 3. Build release images and the one-shot migration image.
       - name: Build and push images
         env:
           ACR: ${{ steps.base.outputs.acrLoginServer }}
@@ -157,12 +191,66 @@ jobs:
           docker build frontend --build-arg REACT_APP_API_URL=/api -t "$ACR/frontend:$TAG" -t "$ACR/frontend:latest"
           docker push "$ACR/frontend:$TAG"
           docker push "$ACR/frontend:latest"
+          docker build db -t "$ACR/db-migrate:$TAG"
+          docker push "$ACR/db-migrate:$TAG"
 
-      # 4. Deploy the Container Apps referencing the freshly pushed images.
+      - name: Run database migrations in Azure
+        timeout-minutes: 12
+        env:
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          POSTGRES_MIGRATOR_PASSWORD: ${{ secrets.POSTGRES_MIGRATOR_PASSWORD }}
+        run: |
+          params=$(mktemp "$RUNNER_TEMP/migrations-params.XXXXXX.json")
+          trap 'rm -f "$params"' EXIT
+          jq -n '{
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            contentVersion: "1.0.0.0",
+            parameters: {postgresMigratorPassword: {value: env.POSTGRES_MIGRATOR_PASSWORD}}
+          }' > "$params"
+          job=$(az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "db-job-${{ github.sha }}" \
+            --template-file infra/migrations.bicep \
+            --parameters "@$params" \
+            --parameters \
+              environmentId="${{ steps.base.outputs.environmentId }}" \
+              acrLoginServer="${{ steps.base.outputs.acrLoginServer }}" \
+              acrName="${{ steps.base.outputs.acrName }}" \
+              imageTag="${{ github.sha }}" \
+              postgresHost="${{ steps.base.outputs.postgresHost }}" \
+              postgresDbName="${{ steps.base.outputs.postgresDbName }}" \
+            --query properties.outputs.migrationJobName.value -o tsv)
+          execution=$(az containerapp job start --name "$job" --resource-group "$RESOURCE_GROUP" \
+            --query name -o tsv)
+          if [[ -z "$execution" ]]; then
+            echo "::error::Azure did not return a migration execution name"
+            exit 1
+          fi
+          echo "Migration execution: $execution"
+          for attempt in {1..102}; do
+            status=$(az containerapp job execution show --name "$job" --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$execution" --query properties.status -o tsv)
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Canceled|Cancelled|Degraded)
+                echo "::error::Migration $execution ended with status $status"
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo "::error::Timed out waiting for migration $execution"
+          exit 1
+
+      # Revisions are deployed only after this execution has succeeded.
       - name: Deploy container apps
         env:
           RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_AUTH_PASSWORD: ${{ secrets.POSTGRES_AUTH_PASSWORD }}
+          POSTGRES_CATEGORIES_PASSWORD: ${{ secrets.POSTGRES_CATEGORIES_PASSWORD }}
+          POSTGRES_TRANSACTIONS_PASSWORD: ${{ secrets.POSTGRES_TRANSACTIONS_PASSWORD }}
+          RETAIN_LEGACY_DB_SECRET: ${{ vars.RETAIN_LEGACY_DB_SECRET }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
@@ -172,7 +260,12 @@ jobs:
             "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
             contentVersion: "1.0.0.0",
             parameters: {
-              postgresAdminPassword: {value: env.POSTGRES_ADMIN_PASSWORD},
+              postgresAuthPassword: {value: env.POSTGRES_AUTH_PASSWORD},
+              postgresCategoriesPassword: {value: env.POSTGRES_CATEGORIES_PASSWORD},
+              postgresTransactionsPassword: {value: env.POSTGRES_TRANSACTIONS_PASSWORD},
+              legacyPostgresAdminPassword: {
+                value: (if env.RETAIN_LEGACY_DB_SECRET == "true" then env.POSTGRES_ADMIN_PASSWORD else "" end)
+              },
               jwtSecret: {value: env.JWT_SECRET},
               internalApiKey: {value: env.INTERNAL_API_KEY}
             }
@@ -189,7 +282,6 @@ jobs:
               imageTag="${{ github.sha }}" \
               postgresHost="${{ steps.base.outputs.postgresHost }}" \
               postgresDbName="${{ steps.base.outputs.postgresDbName }}" \
-              postgresAdminLogin="${{ steps.base.outputs.postgresAdminLogin }}" \
             --output none
 
       - name: Output gateway URL

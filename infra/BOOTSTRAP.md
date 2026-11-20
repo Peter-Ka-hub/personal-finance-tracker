@@ -1,14 +1,19 @@
 # Azure Bootstrap — jednorazowa konfiguracja
 
-Wykonaj te kroki **raz**. Potem każdy `git push` na `master` automatycznie:
+Po jednorazowym przygotowaniu ról i bazy zatwierdzony push na `master`
+uruchamia następujące kroki.
+
 1. uruchamia testy jednostkowe (gate),
 2. wdraża infrastrukturę bazową (`infra/base.bicep`),
-3. buduje i wypycha 5 obrazów do ACR,
-4. wdraża kontenery (`infra/apps.bicep`) do Azure Container Apps.
+3. buduje i wypycha obrazy aplikacji i migratora do ACR,
+4. uruchamia migracje w `ca-db-migrate`,
+5. po sukcesie migracji wdraża aplikacje przez `infra/apps.bicep`.
 
 > Architektura w Azure (wszystko w kontenerach):
 > `gateway` (Nginx, publiczny HTTPS) → `auth` / `categories` / `transactions` / `frontend`
-> (wewnętrzne), dane w **Azure Database for PostgreSQL Flexible Server** (prywatny, VNet).
+> (wewnętrzne). Azure Database for PostgreSQL Flexible Server ma publiczny
+> endpoint z regułą dopuszczającą usługi Azure. Job migracji działa w tym samym
+> Azure Container Apps Environment co aplikacje.
 
 ## 1. Zaloguj się i utwórz Resource Group
 
@@ -64,6 +69,10 @@ Ustaw wartości w **Settings → Secrets and variables → Actions → Repositor
 | `AZURE_SUBSCRIPTION_ID`   | z kroku 2                                |
 | `RESOURCE_GROUP`          | `rg-finance-tracker-prod`                |
 | `POSTGRES_ADMIN_PASSWORD` | hasło administratora PostgreSQL          |
+| `POSTGRES_MIGRATOR_PASSWORD` | hasło `finance_migrator` używane przez job migracji |
+| `POSTGRES_AUTH_PASSWORD` | hasło `finance_auth` |
+| `POSTGRES_CATEGORIES_PASSWORD` | hasło `finance_categories` |
+| `POSTGRES_TRANSACTIONS_PASSWORD` | hasło `finance_transactions` |
 | `JWT_SECRET`              | losowy klucz współdzielony przez Auth, Categories i Transactions |
 | `INTERNAL_API_KEY`        | niezależny losowy klucz współdzielony przez Auth i Categories |
 
@@ -85,6 +94,8 @@ usuwane na końcu odpowiednich kroków.
 
 ## 4. Pierwszy deploy
 
+Przed pierwszym uruchomieniem workflow przygotuj role w istniejącej lub nowej
+bazie zgodnie z [instrukcją migracji](../db/README.md#pierwsze-przejście-w-azure).
 Po zatwierdzeniu wdrożenia uruchom **Actions → Deploy to Azure → Run workflow**
 dla `master`. Aktualizacja `master`, w tym scalenie PR, również uruchamia
 ten workflow. Przy przejściu ze starego szablonu zastosuj poniższą procedurę
@@ -93,7 +104,8 @@ rotacji przed dopuszczeniem zmian na `master`.
 Workflow `deploy.yml` sam, w odpowiedniej kolejności:
 - wdraża `base.bicep` (tworzy m.in. ACR i PostgreSQL),
 - loguje się do ACR poświadczeniami admina,
-- buduje i wypycha obrazy `auth`, `categories`, `transactions`, `gateway`, `frontend`,
+- buduje i wypycha obrazy `auth`, `categories`, `transactions`, `gateway`, `frontend` i `db-migrate`,
+- uruchamia `ca-db-migrate` z obrazem danego SHA i czeka na `Succeeded`,
 - wdraża `apps.bicep` (5 Container Apps) na obrazach z bieżącego SHA.
 
 Pierwsze wdrożenie trwa dłużej (provisioning PostgreSQL ~5–10 min).
@@ -110,9 +122,9 @@ Pierwsze wdrożenie trwa dłużej (provisioning PostgreSQL ~5–10 min).
    do historii i zastosuj zasady obsługi incydentów organizacji.
 2. Ustaw oba nowe klucze w GitHub Actions zgodnie z krokiem 3. Przy rotacji
    bazy zapisz też nowe `POSTGRES_ADMIN_PASSWORD`. Wstrzymaj inne wdrożenia
-   na czas zmiany. Workflow z tej wersji najpierw aktualizuje hasło w PostgreSQL
-   przez `base.bicep`, a później zasila nim Auth, Categories i Transactions
-   przez `apps.bicep`. W tym oknie nowe połączenia do bazy mogą chwilowo zawodzić.
+   na czas zmiany. `base.bicep` ustawia hasło administratora. Podczas przejścia
+   rewizje korzystające ze starego hasła wymagają skoordynowanego odświeżenia.
+   Nowe rewizje używają dedykowanych ról i haseł.
 3. Wdróż zatwierdzoną wersję z zabezpieczonym Bicep i poprawką bramy. Sprawdź
    gotowość nowych rewizji i to, czy ruch trafia do nich. Sama aktualizacja
    sekretu nie tworzy rewizji. Przy ponowieniu z tym samym obrazem zrestartuj
@@ -126,8 +138,8 @@ Pierwsze wdrożenie trwa dłużej (provisioning PostgreSQL ~5–10 min).
    publiczne dodanie kategorii po zalogowaniu. Żądanie
    `POST /api/categories/seed` przez publiczną bramę powinno zwrócić 404.
 5. Sprawdź w Azure **Deployments → Inputs** dla nowych wdrożeń `base-*`,
-   `apps-*` i ich modułów. Wartości `postgresAdminPassword`, `adminPassword`,
-   `jwtSecret`, `internalApiKey`, `appSecrets` i `acrPassword` mają być ukryte
+   `db-job-*`, `apps-*` i ich modułów. Sprawdź, czy hasła bazy, klucze
+   aplikacyjne, `appSecrets` i `acrPassword` są ukryte
    tam, gdzie dany parametr występuje. Sprawdź również, czy w Outputs wdrożeń
    i podsumowaniu GitHub Actions są wyłącznie metadane. Przy przeglądzie
    starszych wdrożeń nie eksportuj ani nie kopiuj wartości.
@@ -148,11 +160,12 @@ inicjalizacji w bramie. Przywrócenie poprzedniego szablonu aktywowałoby
 deterministyczne klucze. Przed przywróceniem ruchu powtórz kontrole z punktów
 4 i 5.
 
-## 5. Migracje bazy — automatyczne
+## 5. Migracje bazy
 
-Każdy serwis przy starcie wykonuje `connectDB()` → `createSchema(...)` +
-`sequelize.sync({ alter: true })`, więc schematy (`auth`, `categories`,
-`transactions`) i tabele tworzą się same. Brak ręcznego kroku migracji.
+Migracje SQL wykonuje `finance_migrator` w jednorazowym Azure Container Apps
+Job. Usługi przy starcie sprawdzają połączenie na rolach wykonawczych.
+Przejęcie schematu, kolejność przełączenia i wycofanie aplikacji opisuje
+[dokumentacja migracji](../db/README.md).
 
 ## 6. Adres aplikacji
 

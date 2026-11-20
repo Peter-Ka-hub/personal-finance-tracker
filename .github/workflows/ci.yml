@@ -61,6 +61,10 @@ jobs:
           DB_PASSWORD=ci_test_password_123
           DB_NAME=financedb
           DB_SSL=false
+          POSTGRES_MIGRATOR_PASSWORD=ci_test_migrator_password
+          POSTGRES_AUTH_PASSWORD=ci_test_auth_db_password
+          POSTGRES_CATEGORIES_PASSWORD=ci_test_categories_db_password
+          POSTGRES_TRANSACTIONS_PASSWORD=ci_test_transactions_db_password
           JWT_SECRET=ci_jwt_secret_min_32_chars_aaaaaaaaaaaa
           INTERNAL_API_KEY=ci_internal_api_key_min_32_chars_bbbb
           EOF
@@ -68,6 +72,8 @@ jobs:
         run: docker compose up -d --build
       - name: Run e2e tests
         run: node --test e2e/app.test.mjs
+      - name: Test PostgreSQL migrations and roles
+        run: bash db/test-migrations.sh
       - name: Dump container logs on failure
         if: failure()
         run: docker compose logs --no-color | tail -n 300

@@ -1,6 +1,10 @@
 # Copy .env.example to .env and fill in credentials before running.
 # Start with: docker compose up --build
 
+x-db-client: &db-client
+  PGHOST: postgres
+  PGDATABASE: ${DB_NAME}
+
 networks:
   microservices-net:
     driver: bridge
@@ -23,6 +27,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  db-bootstrap:
+    build: ./db
+    command: ["-f", "/db/bootstrap.sql"]
+    environment:
+      <<: *db-client
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Set POSTGRES_MIGRATOR_PASSWORD}
+      POSTGRES_AUTH_PASSWORD: ${POSTGRES_AUTH_PASSWORD:?Set POSTGRES_AUTH_PASSWORD}
+      POSTGRES_CATEGORIES_PASSWORD: ${POSTGRES_CATEGORIES_PASSWORD:?Set POSTGRES_CATEGORIES_PASSWORD}
+      POSTGRES_TRANSACTIONS_PASSWORD: ${POSTGRES_TRANSACTIONS_PASSWORD:?Set POSTGRES_TRANSACTIONS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  db-migrate:
+    build: ./db
+    environment:
+      <<: *db-client
+      PGUSER: finance_migrator
+      PGPASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Set POSTGRES_MIGRATOR_PASSWORD}
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - microservices-net
 
   # ── Frontend ────────────────────────────────────────────────────────────────
   frontend:
@@ -66,16 +99,16 @@ services:
       PORT: 3001
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_USER: finance_auth
+      DB_PASSWORD: ${POSTGRES_AUTH_PASSWORD:?Set POSTGRES_AUTH_PASSWORD}
       DB_NAME: ${DB_NAME}
       DB_SSL: "false"
       JWT_SECRET: ${JWT_SECRET}
       CATEGORIES_SERVICE_URL: http://categories:3002
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       - microservices-net
     restart: unless-stopped
@@ -91,15 +124,15 @@ services:
       PORT: 3002
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_USER: finance_categories
+      DB_PASSWORD: ${POSTGRES_CATEGORIES_PASSWORD:?Set POSTGRES_CATEGORIES_PASSWORD}
       DB_NAME: ${DB_NAME}
       DB_SSL: "false"
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       - microservices-net
     restart: unless-stopped
@@ -115,14 +148,14 @@ services:
       PORT: 3003
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_USER: finance_transactions
+      DB_PASSWORD: ${POSTGRES_TRANSACTIONS_PASSWORD:?Set POSTGRES_TRANSACTIONS_PASSWORD}
       DB_NAME: ${DB_NAME}
       DB_SSL: "false"
       JWT_SECRET: ${JWT_SECRET}
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       - microservices-net
     restart: unless-stopped

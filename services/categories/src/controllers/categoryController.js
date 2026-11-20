@@ -71,7 +71,13 @@ const seedCategories = async (req, res) => {
 
   try {
     const created = await sequelize.transaction(async (transaction) => {
-      const [, firstSeed] = await CategorySeed.findOrCreate({ where: { userId }, transaction });
+      // Sequelize findOrCreate can create a temporary PostgreSQL function.
+      const table = sequelize.getQueryInterface().queryGenerator.quoteTable(CategorySeed.getTableName());
+      const [inserted] = await sequelize.query(`
+        INSERT INTO ${table} ("userId") VALUES ($userId)
+        ON CONFLICT ("userId") DO NOTHING RETURNING "userId"
+      `, { bind: { userId }, transaction });
+      const firstSeed = inserted.length > 0;
       if (firstSeed) {
         const rows = categories.map(cat => ({ ...cat, userId }));
         await Category.bulkCreate(rows, { transaction, validate: true });

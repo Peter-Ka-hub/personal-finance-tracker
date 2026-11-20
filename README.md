@@ -83,10 +83,8 @@ Znacznik pozostaje po usunięciu kategorii. Konta sprzed zmiany startują bez
 oczekującej inicjalizacji, ponieważ pusta lista może wynikać z decyzji
 użytkownika. Historyczne przypadki wymagają indywidualnej oceny.
 
-Przy aktualizacji uruchom najpierw nową wersję Categories, która tworzy
-tabelę znaczników, następnie przełącz ruch na nową wersję Auth, która dodaje
-tabelę oczekujących inicjalizacji. Obie tabele powstają podczas istniejącej
-synchronizacji schematu przy starcie usług.
+Obie tabele tworzy migracja 002 przed startem usług. Kolejność przejścia
+opisuje [instrukcja migracji](db/README.md).
 
 ### Kategorie w historii transakcji
 
@@ -94,14 +92,9 @@ Domyślne `GET /api/categories` zwraca aktywne kategorie użytkownika.
 `includeArchived=true` dodaje zarchiwizowane kategorie wraz z nazwą i kolorem.
 Transakcje bez istniejącej kategorii mają w interfejsie etykietę „Nieznana kategoria”.
 
-Categories dodaje nullable `archivedAt` podczas istniejącej synchronizacji schematu
-przy starcie. Uruchom nową wersję Categories, potwierdź obecność kolumny, a następnie
-przełącz Transactions i frontend. W czasie przełączenia wstrzymaj zapisy transakcji
-i archiwizację, dopóki obie usługi nie będą działały w nowych wersjach.
-Dotychczasowe kategorie pozostają aktywne. Nie ma nowych kluczy obcych ani
-uzupełniania historycznych powiązań. Po zapisaniu archiwizacji unikaj uruchamiania
-starszej wersji Categories z automatycznym `sync({ alter: true })`, ponieważ
-synchronizacja starszego modelu może usunąć kolumnę i stan archiwizacji.
+Kolumnę `archivedAt` dodaje migracja 003. Dotychczasowe kategorie pozostają
+aktywne, a historyczne powiązania zostają zachowane. Kolejność przejścia
+opisuje [instrukcja migracji](db/README.md).
 
 Transactions i Categories używają wspólnego PostgreSQL. Zapis transakcji
 sprawdza właściciela, typ i stan kategorii, blokując jej wiersz przez `FOR SHARE`
@@ -132,8 +125,14 @@ Zmienne środowiskowe (`.env`) — wszystkie sekrety pochodzą stąd, nic nie je
 | Zmienna            | Opis |
 |--------------------|------|
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Dane logowania PostgreSQL |
+| `POSTGRES_MIGRATOR_PASSWORD` | Hasło roli uruchamiającej migracje |
+| `POSTGRES_AUTH_PASSWORD`, `POSTGRES_CATEGORIES_PASSWORD`, `POSTGRES_TRANSACTIONS_PASSWORD` | Hasła dedykowanych ról usług |
 | `JWT_SECRET`       | Sekret do podpisu JWT (min. 32 znaki) |
 | `INTERNAL_API_KEY` | Klucz wywołań wewnętrznych (auth → categories) |
+
+Compose czeka na przygotowanie ról i zakończenie migracji przed uruchomieniem
+usług. Instrukcje dla istniejącej bazy i startu usług poza Compose są w
+[dokumentacji migracji i ról](db/README.md).
 
 ## Testy
 
@@ -163,8 +162,9 @@ rekord ze starszym typem powiązania, więc uruchamiaj go na bazie testowej.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — przy każdym PR/push: testy jednostkowe
   (matryca 3 serwisów), build + testy frontendu, testy **e2e** na świeżo postawionym docker-compose.
 - [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — wdrożenie na Azure dopiero po
-  zielonych testach: `base.bicep` (ACR, PostgreSQL) → build i push 5 obrazów → `apps.bicep`
-  (5 Container Apps). Logowanie do Azure przez **OIDC** (bez długożyciowych sekretów).
+  zielonych testach. Po zbudowaniu obrazów uruchamia migracje w Azure Container
+  Apps Job i stosuje `apps.bicep` dopiero po sukcesie joba. Logowanie do Azure
+  odbywa się przez **OIDC**.
 
 ## Struktura repozytorium
 
