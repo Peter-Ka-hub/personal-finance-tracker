@@ -72,7 +72,8 @@ paths:
   /api/auth/register:
     post:
       tags: [auth]
-      summary: Register a new user (also seeds 10 default categories)
+      summary: Register a new user and receive a JWT
+      description: If category initialization fails temporarily, it is retried at the next successful login.
       security: []
       requestBody:
         required: true
@@ -91,6 +92,7 @@ paths:
     post:
       tags: [auth]
       summary: Log in and receive a JWT
+      description: Retries pending default category initialization after verifying credentials.
       security: []
       requestBody:
         required: true

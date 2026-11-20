@@ -1,4 +1,6 @@
 const Category = require('../models/Category');
+const CategorySeed = require('../models/CategorySeed');
+const { sequelize } = require('../config/db');
 
 const getCategories = async (req, res) => {
   try {
@@ -58,14 +60,22 @@ const seedCategories = async (req, res) => {
   }
 
   const { userId, categories } = req.body;
-  if (!userId || !Array.isArray(categories)) {
+  if (!userId || !Array.isArray(categories) || categories.length === 0) {
     return res.status(400).json({ message: 'userId i categories są wymagane' });
   }
 
   try {
-    const rows = categories.map(cat => ({ ...cat, userId }));
-    await Category.bulkCreate(rows);
-    res.status(201).json({ message: 'Kategorie domyślne utworzone' });
+    const created = await sequelize.transaction(async (transaction) => {
+      const [, firstSeed] = await CategorySeed.findOrCreate({ where: { userId }, transaction });
+      if (firstSeed) {
+        const rows = categories.map(cat => ({ ...cat, userId }));
+        await Category.bulkCreate(rows, { transaction, validate: true });
+      }
+      return firstSeed;
+    });
+    res.status(created ? 201 : 200).json({
+      message: created ? 'Kategorie domyślne utworzone' : 'Kategorie zostały już zainicjalizowane',
+    });
   } catch (error) {
     console.error('[category-service] Błąd seedowania kategorii:', error);
     res.status(500).json({ message: 'Błąd serwera' });

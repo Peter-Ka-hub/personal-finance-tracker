@@ -3,10 +3,13 @@ process.env.JWT_SECRET = 'test-secret-key-min-32-characters-long!!';
 process.env.INTERNAL_API_KEY = 'internal-test-key';
 
 jest.mock('../src/models/Category');
+jest.mock('../src/models/CategorySeed');
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const Category = require('../src/models/Category');
+const CategorySeed = require('../src/models/CategorySeed');
+const { sequelize } = require('../src/config/db');
 const app = require('../src/app');
 
 const token = jwt.sign({ id: 'user-1', username: 'alice' }, process.env.JWT_SECRET);
@@ -65,12 +68,25 @@ describe('category-service', () => {
   });
 
   test('seed endpoint accepts the correct internal key', async () => {
+    const transaction = {};
+    const runTransaction = jest.spyOn(sequelize, 'transaction').mockImplementation(
+      (callback) => callback(transaction)
+    );
+    CategorySeed.findOrCreate.mockResolvedValue([{}, true]);
     Category.bulkCreate.mockResolvedValue([]);
-    const res = await request(app)
-      .post('/api/categories/seed')
-      .set('X-Internal-Key', process.env.INTERNAL_API_KEY)
-      .send({ userId: 'u', categories: [{ name: 'X', type: 'expense' }] });
-    expect(res.status).toBe(201);
-    expect(Category.bulkCreate).toHaveBeenCalled();
+    try {
+      const res = await request(app)
+        .post('/api/categories/seed')
+        .set('X-Internal-Key', process.env.INTERNAL_API_KEY)
+        .send({ userId: 'u', categories: [{ name: 'X', type: 'expense' }] });
+      expect(res.status).toBe(201);
+      expect(CategorySeed.findOrCreate).toHaveBeenCalledWith({ where: { userId: 'u' }, transaction });
+      expect(Category.bulkCreate).toHaveBeenCalledWith(
+        [{ userId: 'u', name: 'X', type: 'expense' }],
+        { transaction, validate: true }
+      );
+    } finally {
+      runTransaction.mockRestore();
+    }
   });
 });
