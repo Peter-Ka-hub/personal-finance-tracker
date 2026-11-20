@@ -64,6 +64,10 @@ jobs:
         run: node --test e2e/app.test.mjs
       - name: Test PostgreSQL migrations and roles
         run: bash db/test-migrations.sh
+      - name: Test TLS verification and firewall parameters
+        run: |
+          python3 -m unittest discover -s infra -p test_firewall_config.py
+          bash e2e/tls/run.sh
       - name: Dump container logs on failure
         if: failure()
         run: docker compose logs --no-color | tail -n 300
@@ -141,13 +145,18 @@ jobs:
         env:
           RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_FIREWALL_CONFIG: ${{ vars.POSTGRES_FIREWALL_CONFIG }}
         run: |
+          firewall=$(python3 infra/firewall_config.py)
           params=$(mktemp "$RUNNER_TEMP/base-params.XXXXXX.json")
           trap 'rm -f "$params"' EXIT
-          jq -n '{
+          jq -n --argjson firewall "$firewall" '{
             "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
             contentVersion: "1.0.0.0",
-            parameters: {postgresAdminPassword: {value: env.POSTGRES_ADMIN_PASSWORD}}
+            parameters: {
+              postgresAdminPassword: {value: env.POSTGRES_ADMIN_PASSWORD},
+              postgresFirewall: {value: $firewall}
+            }
           }' > "$params"
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \

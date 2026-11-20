@@ -1,12 +1,13 @@
 FROM nginx:1.27-alpine
 
 # envsubst is included in nginx:alpine via gettext package
-RUN apk add --no-cache gettext
+RUN apk add --no-cache gettext ca-certificates
 
 COPY nginx.conf /etc/nginx/nginx.conf.template
 
 # Default values match docker-compose service names for local dev (http upstreams)
 ENV UPSTREAM_SCHEME=http \
+    UPSTREAM_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     AUTH_HOST=auth \
     AUTH_PORT=3001 \
     CATEGORIES_HOST=categories \
@@ -19,4 +20,4 @@ ENV UPSTREAM_SCHEME=http \
 EXPOSE 80
 
 # Substitute env vars into nginx config at container start
-CMD ["/bin/sh", "-c", "envsubst '${UPSTREAM_SCHEME} ${AUTH_HOST} ${AUTH_PORT} ${CATEGORIES_HOST} ${CATEGORIES_PORT} ${TRANSACTIONS_HOST} ${TRANSACTIONS_PORT} ${FRONTEND_HOST} ${FRONTEND_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "envsubst '${UPSTREAM_SCHEME} ${UPSTREAM_CA_BUNDLE} ${AUTH_HOST} ${AUTH_PORT} ${CATEGORIES_HOST} ${CATEGORIES_PORT} ${TRANSACTIONS_HOST} ${TRANSACTIONS_PORT} ${FRONTEND_HOST} ${FRONTEND_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]

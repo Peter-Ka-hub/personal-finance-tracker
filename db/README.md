@@ -75,7 +75,8 @@ w lokalnym kontenerze PostgreSQL i usuwa je po zakończeniu.
    wcześniej przygotuj i przetestuj obraz z poprzednią logiką i bez
    automatycznego DDL. Wstrzymaj zapisy podczas zmiany wersji usług.
 3. **Przygotuj role po uzyskaniu zgody.** Na nowym środowisku najpierw
-   utwórz bazę z `infra/base.bicep`. Na istniejącym użyj aktualnego
+   utwórz bazę z `infra/base.bicep`, przekazując `postgresFirewall` według
+   [instrukcji sieciowej](../infra/NETWORKING.md). Na istniejącym użyj aktualnego
    hasła administratora. Z zatwierdzonego hosta Azure z dostępem do bazy
    połącz się jako dotychczasowy administrator posiadający obiekty lub
    odpowiednie uprawnienia do zmiany właściciela. Nie wymaga to dostępu

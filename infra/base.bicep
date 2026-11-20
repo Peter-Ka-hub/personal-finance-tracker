@@ -7,6 +7,8 @@
 // a new one. The Container Apps themselves live in apps.bicep and are deployed
 // AFTER the images have been pushed to the registry created here.
 
+import { PostgresFirewallConfig } from 'modules/postgres.bicep'
+
 @description('Azure region for all resources')
 param location string = 'polandcentral'
 
@@ -16,6 +18,9 @@ param alertEmail string = 'pjoter004@outlook.com'
 @secure()
 @description('PostgreSQL administrator password')
 param postgresAdminPassword string
+
+@description('PostgreSQL firewall mode and approved outbound IPv4 ranges')
+param postgresFirewall PostgresFirewallConfig
 
 @description('Name of the existing Container Apps Environment to reuse')
 param existingEnvironmentName string = 'managedEnvironment-additionalres-83b6'
@@ -44,6 +49,7 @@ module postgres 'modules/postgres.bicep' = {
     location: location
     tags: tags
     adminPassword: postgresAdminPassword
+    firewall: postgresFirewall
   }
 }
 

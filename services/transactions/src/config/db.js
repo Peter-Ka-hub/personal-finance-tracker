@@ -11,7 +11,7 @@ const sequelize = new Sequelize(
     dialect: 'postgres',
     schema: 'transactions',
     dialectOptions: process.env.DB_SSL === 'true' ? {
-      ssl: { require: true, rejectUnauthorized: false }
+      ssl: { host: process.env.DB_HOST, rejectUnauthorized: true }
     } : {},
     logging: false
   }

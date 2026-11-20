@@ -1,12 +1,9 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const https = require('https');
-const http = require('http');
+const { seedCategories } = require('../clients/categories');
 const User = require('../models/User');
 const PendingCategorySeed = require('../models/PendingCategorySeed');
 const { sequelize } = require('../config/db');
-
-const CATEGORY_SEED_TIMEOUT_MS = 1000;
 
 const DEFAULT_CATEGORIES = [
   { name: 'Jedzenie', type: 'expense', color: '#EF4444', icon: 'pizza' },
@@ -21,47 +18,6 @@ const DEFAULT_CATEGORIES = [
   { name: 'Inne przychody', type: 'income', color: '#6B7280', icon: 'more-horizontal' },
 ];
 
-const seedCategories = async (userId) => {
-  const categoriesUrl = process.env.CATEGORIES_SERVICE_URL;
-  const body = JSON.stringify({ userId, categories: DEFAULT_CATEGORIES });
-  const url = new URL(`${categoriesUrl}/api/categories/seed`);
-  const transport = url.protocol === 'https:' ? https : http;
-
-  await new Promise((resolve, reject) => {
-    const req = transport.request(
-      {
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname,
-        method: 'POST',
-        signal: AbortSignal.timeout(CATEGORY_SEED_TIMEOUT_MS),
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'X-Internal-Key': process.env.INTERNAL_API_KEY || '',
-        },
-        // Azure Container Apps' internal ingress uses a platform-managed cert
-        // that isn't in Node's trust store; skip verification for this internal
-        // service-to-service call (traffic stays inside the environment).
-        rejectUnauthorized: false,
-      },
-      (res) => {
-        res.on('error', reject);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve();
-          } else {
-            reject(new Error(`categories seed returned ${res.statusCode}`));
-          }
-        });
-        res.resume();
-      }
-    );
-    req.on('error', reject);
-    req.end(body);
-  });
-};
-
 const completeCategorySeed = async (userId) => {
   if (!process.env.CATEGORIES_SERVICE_URL) {
     return;
@@ -69,7 +25,7 @@ const completeCategorySeed = async (userId) => {
 
   try {
     if (await PendingCategorySeed.findByPk(userId)) {
-      await seedCategories(userId);
+      await seedCategories(userId, DEFAULT_CATEGORIES);
       await PendingCategorySeed.destroy({ where: { userId } });
     }
   } catch (error) {

@@ -1,0 +1,95 @@
+x-db-client: &db-client
+  DB_HOST: postgres
+  DB_USER: tls_fixture
+  DB_PASSWORD: tls_fixture_password
+  DB_NAME: tls_fixture
+  DB_SSL: "true"
+  NODE_EXTRA_CA_CERTS: /tls/ca.crt
+
+x-probe: &probe
+  environment: *db-client
+  volumes:
+    - ./probe.cjs:/probe.cjs:ro
+    - ${TLS_FIXTURES}:/tls:ro
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tls_fixture
+      POSTGRES_PASSWORD: tls_fixture_password
+      POSTGRES_DB: tls_fixture
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /tls/postgres.key /tmp/postgres.key
+        cp /tls/postgres.crt /tmp/postgres.crt
+        chown postgres:postgres /tmp/postgres.key
+        chmod 600 /tmp/postgres.key
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/postgres.crt -c ssl_key_file=/tmp/postgres.key
+    volumes:
+      - ${TLS_FIXTURES}:/tls:ro
+    networks:
+      default:
+        aliases: [postgres-wrong-name]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "tls_fixture"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  https-fixture:
+    image: node:24-alpine
+    command: ["node", "/https.cjs"]
+    volumes:
+      - ./https.cjs:/https.cjs:ro
+      - ${TLS_FIXTURES}:/tls:ro
+    networks:
+      default:
+        aliases: [https-wrong-name]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:net').connect(8443,'127.0.0.1').on('connect',function(){this.end()})"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  auth:
+    <<: *probe
+    build: ../../services/auth
+  categories:
+    <<: *probe
+    build: ../../services/categories
+  transactions:
+    <<: *probe
+    build: ../../services/transactions
+
+  db-migrate:
+    build: ../../db
+    environment:
+      PGHOST: postgres
+      PGUSER: tls_fixture
+      PGPASSWORD: tls_fixture_password
+      PGDATABASE: tls_fixture
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /tls/ca.crt
+      PGCONNECT_TIMEOUT: "5"
+    volumes:
+      - ${TLS_FIXTURES}:/tls:ro
+
+  gateway:
+    build: ../../gateway
+    environment:
+      UPSTREAM_SCHEME: https
+      UPSTREAM_CA_BUNDLE: ${TLS_GATEWAY_CA_BUNDLE:-/tls/ca.crt}
+      AUTH_HOST: ${TLS_GATEWAY_HOST:-https-fixture}
+      CATEGORIES_HOST: ${TLS_GATEWAY_HOST:-https-fixture}
+      TRANSACTIONS_HOST: ${TLS_GATEWAY_HOST:-https-fixture}
+      FRONTEND_HOST: ${TLS_GATEWAY_HOST:-https-fixture}
+      AUTH_PORT: "8443"
+      CATEGORIES_PORT: "8443"
+      TRANSACTIONS_PORT: "8443"
+      FRONTEND_PORT: "8443"
+    ports: ["127.0.0.1::80"]
+    volumes:
+      - ${TLS_FIXTURES}:/tls:ro

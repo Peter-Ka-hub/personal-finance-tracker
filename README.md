@@ -165,6 +165,8 @@ rekord ze starszym typem powiązania, więc uruchamiaj go na bazie testowej.
   zielonych testach. Po zbudowaniu obrazów uruchamia migracje w Azure Container
   Apps Job i stosuje `apps.bicep` dopiero po sukcesie joba. Logowanie do Azure
   odbywa się przez **OIDC**.
+- [TLS i firewall PostgreSQL w Azure](infra/NETWORKING.md) opisuje
+  wymagany parametr sieciowy, weryfikację połączeń i kolejność zawężania dostępu.
 
 ## Struktura repozytorium
 

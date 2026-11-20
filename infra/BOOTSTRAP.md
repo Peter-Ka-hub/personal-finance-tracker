@@ -12,8 +12,9 @@ uruchamia następujące kroki.
 > Architektura w Azure (wszystko w kontenerach):
 > `gateway` (Nginx, publiczny HTTPS) → `auth` / `categories` / `transactions` / `frontend`
 > (wewnętrzne). Azure Database for PostgreSQL Flexible Server ma publiczny
-> endpoint z regułą dopuszczającą usługi Azure. Job migracji działa w tym samym
-> Azure Container Apps Environment co aplikacje.
+> endpoint z regułami firewalla. Job migracji działa w tym samym Azure
+> Container Apps Environment co aplikacje. Weryfikację certyfikatów i
+> kolejność zawężania reguł opisuje [instrukcja sieciowa](NETWORKING.md).
 
 ## 1. Zaloguj się i utwórz Resource Group
 
@@ -93,6 +94,10 @@ przez OIDC. Przekazuje wrażliwe parametry przez tymczasowe pliki na runnerze,
 usuwane na końcu odpowiednich kroków.
 
 ## 4. Pierwszy deploy
+
+Ustaw wymaganą zmienną repozytorium `POSTGRES_FIREWALL_CONFIG` zgodnie z
+[instrukcją sieciową](NETWORKING.md#1-potwierdź-tls-przed-zmianą-firewalla).
+Przy istniejącej regule Azure-wide zacznij od trybu `overlap`.
 
 Przed pierwszym uruchomieniem workflow przygotuj role w istniejącej lub nowej
 bazie zgodnie z [instrukcją migracji](../db/README.md#pierwsze-przejście-w-azure).

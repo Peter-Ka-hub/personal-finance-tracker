@@ -3,9 +3,8 @@
 // Five apps: auth, categories, transactions (internal), frontend (internal),
 // gateway (external, internet-facing).
 //
-// Service-to-service traffic stays inside the Container Apps Environment over
-// plain HTTP (allowInsecure) to avoid internal TLS-trust issues; the public
-// edge (gateway) is served over HTTPS by the platform.
+// Azure ingress is HTTPS-only. Service-to-service clients use and verify the
+// internal ingress FQDNs. Compose has its own local HTTP configuration.
 
 @description('Azure region for all resources')
 param location string = 'polandcentral'
@@ -102,7 +101,7 @@ module caCategories 'modules/containerapp.bicep' = {
     containerImage: categoriesImage
     containerPort: 3002
     externalIngress: false
-    allowInsecure: true
+    allowInsecure: false
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword
@@ -126,7 +125,7 @@ module caAuth 'modules/containerapp.bicep' = {
     containerImage: authImage
     containerPort: 3001
     externalIngress: false
-    allowInsecure: true
+    allowInsecure: false
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword
@@ -151,7 +150,7 @@ module caTransactions 'modules/containerapp.bicep' = {
     containerImage: transactionsImage
     containerPort: 3003
     externalIngress: false
-    allowInsecure: true
+    allowInsecure: false
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword
@@ -174,7 +173,7 @@ module caFrontend 'modules/containerapp.bicep' = {
     containerImage: frontendImage
     containerPort: 3000
     externalIngress: false
-    allowInsecure: true
+    allowInsecure: false
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword
