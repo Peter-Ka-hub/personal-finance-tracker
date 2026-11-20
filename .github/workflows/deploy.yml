@@ -73,6 +73,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check required deployment secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          missing=0
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID RESOURCE_GROUP POSTGRES_ADMIN_PASSWORD JWT_SECRET INTERNAL_API_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
@@ -84,12 +103,22 @@ jobs:
       #    we push to in the next step. Idempotent on re-runs.
       - name: Deploy base infrastructure
         id: base
+        env:
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
         run: |
+          params=$(mktemp "$RUNNER_TEMP/base-params.XXXXXX.json")
+          trap 'rm -f "$params"' EXIT
+          jq -n '{
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            contentVersion: "1.0.0.0",
+            parameters: {postgresAdminPassword: {value: env.POSTGRES_ADMIN_PASSWORD}}
+          }' > "$params"
           az deployment group create \
-            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --resource-group "$RESOURCE_GROUP" \
             --name "base-${{ github.sha }}" \
             --template-file infra/base.bicep \
-            --parameters postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+            --parameters "@$params" \
             --query properties.outputs -o json > base_outputs.json
           {
             echo "acrLoginServer=$(jq -r .acrLoginServer.value base_outputs.json)"
@@ -107,7 +136,8 @@ jobs:
           ACR_NAME="${{ steps.base.outputs.acrName }}"
           ACR_USER=$(az acr credential show -n "$ACR_NAME" --query username -o tsv)
           ACR_PW=$(az acr credential show -n "$ACR_NAME" --query 'passwords[0].value' -o tsv)
-          echo "$ACR_PW" | docker login "${{ steps.base.outputs.acrLoginServer }}" -u "$ACR_USER" --password-stdin
+          printf '::add-mask::%s\n' "$ACR_PW"
+          printf '%s\n' "$ACR_PW" | docker login "${{ steps.base.outputs.acrLoginServer }}" -u "$ACR_USER" --password-stdin
 
       # 3. Build and push all five images, tagged with the commit SHA.
       - name: Build and push images
@@ -130,11 +160,28 @@ jobs:
 
       # 4. Deploy the Container Apps referencing the freshly pushed images.
       - name: Deploy container apps
+        env:
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
+          params=$(mktemp "$RUNNER_TEMP/apps-params.XXXXXX.json")
+          trap 'rm -f "$params"' EXIT
+          jq -n '{
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            contentVersion: "1.0.0.0",
+            parameters: {
+              postgresAdminPassword: {value: env.POSTGRES_ADMIN_PASSWORD},
+              jwtSecret: {value: env.JWT_SECRET},
+              internalApiKey: {value: env.INTERNAL_API_KEY}
+            }
+          }' > "$params"
           az deployment group create \
-            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --resource-group "$RESOURCE_GROUP" \
             --name "apps-${{ github.sha }}" \
             --template-file infra/apps.bicep \
+            --parameters "@$params" \
             --parameters \
               environmentId="${{ steps.base.outputs.environmentId }}" \
               acrLoginServer="${{ steps.base.outputs.acrLoginServer }}" \
@@ -143,7 +190,7 @@ jobs:
               postgresHost="${{ steps.base.outputs.postgresHost }}" \
               postgresDbName="${{ steps.base.outputs.postgresDbName }}" \
               postgresAdminLogin="${{ steps.base.outputs.postgresAdminLogin }}" \
-              postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+            --output none
 
       - name: Output gateway URL
         run: |

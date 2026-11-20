@@ -35,6 +35,14 @@ param postgresAdminLogin string
 @description('PostgreSQL administrator password')
 param postgresAdminPassword string
 
+@secure()
+@description('JWT signing key shared by auth, categories and transactions')
+param jwtSecret string
+
+@secure()
+@description('Internal API key shared by auth and categories')
+param internalApiKey string
+
 var tags = {
   env: 'prod'
   app: 'finance-tracker'
@@ -48,11 +56,6 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
 }
 var acrUsername = acr.listCredentials().username
 var acrPassword = acr.listCredentials().passwords[0].value
-
-// Stable, resource-group-scoped derived secrets — identical across all services
-// and stable across redeploys (so issued JWTs keep working).
-var jwtSecret = guid(resourceGroup().id, 'jwt-secret')
-var internalApiKey = guid(resourceGroup().id, 'internal-api-key')
 
 var authImage = '${acrLoginServer}/auth:${imageTag}'
 var categoriesImage = '${acrLoginServer}/categories:${imageTag}'
@@ -70,14 +73,14 @@ var dbEnvVars = [
   { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
 ]
 
-var commonSecrets = [
-  { name: 'db-password', value: postgresAdminPassword }
-  { name: 'jwt-secret', value: jwtSecret }
-]
+var commonSecrets = {
+  'db-password': postgresAdminPassword
+  'jwt-secret': jwtSecret
+}
 
-var secretsWithInternalKey = concat(commonSecrets, [
-  { name: 'internal-api-key', value: internalApiKey }
-])
+var secretsWithInternalKey = union(commonSecrets, {
+  'internal-api-key': internalApiKey
+})
 
 // ── Categories Service (internal) ─────────────────────────────────────────────
 module caCategories 'modules/containerapp.bicep' = {
@@ -98,7 +101,7 @@ module caCategories 'modules/containerapp.bicep' = {
       { name: 'PORT', value: '3002' }
       { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
     ])
-    secretRefs: secretsWithInternalKey
+    appSecrets: secretsWithInternalKey
   }
 }
 
@@ -122,7 +125,7 @@ module caAuth 'modules/containerapp.bicep' = {
       { name: 'CATEGORIES_SERVICE_URL', value: 'https://${caCategories.outputs.appFqdn}' }
       { name: 'INTERNAL_API_KEY', secretRef: 'internal-api-key' }
     ])
-    secretRefs: secretsWithInternalKey
+    appSecrets: secretsWithInternalKey
   }
 }
 
@@ -144,7 +147,7 @@ module caTransactions 'modules/containerapp.bicep' = {
     envVars: concat(dbEnvVars, [
       { name: 'PORT', value: '3003' }
     ])
-    secretRefs: commonSecrets
+    appSecrets: commonSecrets
   }
 }
 
@@ -164,7 +167,6 @@ module caFrontend 'modules/containerapp.bicep' = {
     acrUsername: acrUsername
     acrPassword: acrPassword
     envVars: []
-    secretRefs: []
   }
 }
 
@@ -196,7 +198,6 @@ module caGateway 'modules/containerapp.bicep' = {
       { name: 'FRONTEND_HOST',     value: caFrontend.outputs.appFqdn }
       { name: 'FRONTEND_PORT',     value: '443' }
     ]
-    secretRefs: []
   }
 }
 
