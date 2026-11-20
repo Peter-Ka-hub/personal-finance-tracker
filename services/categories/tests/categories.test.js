@@ -14,6 +14,7 @@ const app = require('../src/app');
 
 const token = jwt.sign({ id: 'user-1', username: 'alice' }, process.env.JWT_SECRET);
 const auth = (r) => r.set('Authorization', `Bearer ${token}`);
+const categoryId = '11111111-1111-4111-8111-111111111111';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -29,8 +30,16 @@ describe('category-service', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(Category.findAll).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'user-1' } })
+      expect.objectContaining({ where: { userId: 'user-1', archivedAt: null } })
     );
+  });
+
+  test('can include archived categories for the owner', async () => {
+    Category.findAll.mockResolvedValue([{ id: categoryId, archivedAt: '2026-11-20T13:00:00.000Z' }]);
+    const res = await auth(request(app).get('/api/categories?includeArchived=true'));
+    expect(res.status).toBe(200);
+    expect(res.body[0].archivedAt).toBeTruthy();
+    expect(Category.findAll).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1' } }));
   });
 
   test('POST /api/categories creates a category', async () => {
@@ -51,12 +60,27 @@ describe('category-service', () => {
     expect(Category.create).not.toHaveBeenCalled();
   });
 
-  test('DELETE /api/categories/:id removes an owned category', async () => {
-    const destroy = jest.fn().mockResolvedValue();
-    Category.findOne.mockResolvedValue({ id: 'c1', destroy });
-    const res = await auth(request(app).delete('/api/categories/c1'));
+  test('DELETE /api/categories/:id archives an active owned category', async () => {
+    Category.update.mockResolvedValue([1]);
+    const res = await auth(request(app).delete(`/api/categories/${categoryId}`));
     expect(res.status).toBe(200);
-    expect(destroy).toHaveBeenCalled();
+    expect(res.body.id).toBe(categoryId);
+    expect(Category.update).toHaveBeenCalledWith(
+      { archivedAt: expect.any(Date) },
+      { where: { id: categoryId, userId: 'user-1', archivedAt: null } }
+    );
+  });
+
+  test('returns 404 when no matching active category can be archived', async () => {
+    Category.update.mockResolvedValue([0]);
+    const res = await auth(request(app).delete(`/api/categories/${categoryId}`));
+    expect(res.status).toBe(404);
+  });
+
+  test('rejects an invalid delete id before querying the database', async () => {
+    const res = await auth(request(app).delete('/api/categories/invalid'));
+    expect(res.status).toBe(400);
+    expect(Category.update).not.toHaveBeenCalled();
   });
 
   test('seed endpoint rejects a wrong internal key', async () => {

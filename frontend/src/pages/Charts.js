@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { getTransactions } from "../api/transactionsApi";
 import { getCategories } from "../api/categoriesApi";
+import { groupCategoryTotals } from "../utils/categoryTotals";
 
 const formatCurrency = (value) => {
   return new Intl.NumberFormat("pl-PL", {
@@ -34,6 +35,17 @@ const FALLBACK_COLORS_INCOME = [
   "#10B981", "#06B6D4", "#3B82F6", "#14B8A6", "#22D3EE", "#0EA5E9",
   "#6366F1", "#8B5CF6", "#2DD4BF", "#34D399",
 ];
+
+function getBreakdown(transactions, categoriesById, type, total, fallbackColors) {
+  return groupCategoryTotals(transactions, categoriesById, type)
+    .map((category, index) => ({
+      ...category,
+      value: Math.round(category.value * 100) / 100,
+      color: category.color || fallbackColors[index % fallbackColors.length],
+      percentage: total > 0 ? Math.round((category.value / total) * 100) : 0,
+    }))
+    .sort((a, b) => b.value - a.value);
+}
 
 // Custom tooltip dla wykresów
 const CustomTooltip = ({ active, payload }) => {
@@ -124,58 +136,6 @@ export default function Charts() {
     [categories]
   );
 
-  // Grupowanie wydatków po kategorii
-  const expensesByCategory = useMemo(() => {
-    const expenses = transactions.filter((t) => t.type === "expense");
-    const total = expenses.reduce((s, t) => s + parseFloat(t.amount), 0);
-    const grouped = expenses.reduce((acc, curr) => {
-      const val = parseFloat(curr.amount);
-      const cat = categoriesMap[curr.categoryId];
-      const catName = cat ? cat.name : "Inne";
-      const catColor = cat?.color || null;
-      if (!acc[catName]) {
-        acc[catName] = { value: 0, color: catColor };
-      }
-      acc[catName].value += val;
-      return acc;
-    }, {});
-
-    return Object.entries(grouped)
-      .map(([name, data], index) => ({
-        name,
-        value: Math.round(data.value * 100) / 100,
-        color: data.color || FALLBACK_COLORS_EXPENSE[index % FALLBACK_COLORS_EXPENSE.length],
-        percentage: total > 0 ? Math.round((data.value / total) * 100) : 0,
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [transactions, categoriesMap]);
-
-  // Grupowanie przychodów po kategorii
-  const incomeByCategory = useMemo(() => {
-    const incomes = transactions.filter((t) => t.type === "income");
-    const total = incomes.reduce((s, t) => s + parseFloat(t.amount), 0);
-    const grouped = incomes.reduce((acc, curr) => {
-      const val = parseFloat(curr.amount);
-      const cat = categoriesMap[curr.categoryId];
-      const catName = cat ? cat.name : "Inne";
-      const catColor = cat?.color || null;
-      if (!acc[catName]) {
-        acc[catName] = { value: 0, color: catColor };
-      }
-      acc[catName].value += val;
-      return acc;
-    }, {});
-
-    return Object.entries(grouped)
-      .map(([name, data], index) => ({
-        name,
-        value: Math.round(data.value * 100) / 100,
-        color: data.color || FALLBACK_COLORS_INCOME[index % FALLBACK_COLORS_INCOME.length],
-        percentage: total > 0 ? Math.round((data.value / total) * 100) : 0,
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [transactions, categoriesMap]);
-
   const totalExpense = useMemo(
     () =>
       transactions
@@ -190,6 +150,15 @@ export default function Charts() {
         .filter((t) => t.type === "income")
         .reduce((s, t) => s + parseFloat(t.amount), 0),
     [transactions]
+  );
+
+  const expensesByCategory = useMemo(
+    () => getBreakdown(transactions, categoriesMap, "expense", totalExpense, FALLBACK_COLORS_EXPENSE),
+    [transactions, categoriesMap, totalExpense]
+  );
+  const incomeByCategory = useMemo(
+    () => getBreakdown(transactions, categoriesMap, "income", totalIncome, FALLBACK_COLORS_INCOME),
+    [transactions, categoriesMap, totalIncome]
   );
 
   if (txLoading || catLoading) {
@@ -291,9 +260,9 @@ export default function Charts() {
                       animationDuration={800}
                       animationEasing="ease-out"
                     >
-                      {incomeByCategory.map((entry, index) => (
+                      {incomeByCategory.map((entry) => (
                         <Cell
-                          key={`income-cell-${index}`}
+                          key={entry.id}
                           fill={entry.color}
                           stroke="white"
                           strokeWidth={2}
@@ -309,9 +278,9 @@ export default function Charts() {
 
               {/* Lista kategorii przychodów */}
               <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-                {incomeByCategory.map((item, index) => (
+                {incomeByCategory.map((item) => (
                   <div
-                    key={index}
+                    key={item.id}
                     className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex items-center gap-2.5">
@@ -376,9 +345,9 @@ export default function Charts() {
                       animationDuration={800}
                       animationEasing="ease-out"
                     >
-                      {expensesByCategory.map((entry, index) => (
+                      {expensesByCategory.map((entry) => (
                         <Cell
-                          key={`expense-cell-${index}`}
+                          key={entry.id}
                           fill={entry.color}
                           stroke="white"
                           strokeWidth={2}
@@ -394,9 +363,9 @@ export default function Charts() {
 
               {/* Lista kategorii wydatków */}
               <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-                {expensesByCategory.map((item, index) => (
+                {expensesByCategory.map((item) => (
                   <div
-                    key={index}
+                    key={item.id}
                     className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex items-center gap-2.5">

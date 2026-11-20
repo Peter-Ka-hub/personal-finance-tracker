@@ -3,9 +3,13 @@ const CategorySeed = require('../models/CategorySeed');
 const { sequelize } = require('../config/db');
 
 const getCategories = async (req, res) => {
+  const where = { userId: req.user.id };
+  if (req.query.includeArchived !== 'true') {
+    where.archivedAt = null;
+  }
   try {
     const categories = await Category.findAll({
-      where: { userId: req.user.id },
+      where,
       order: [['createdAt', 'ASC']]
     });
     res.status(200).json(categories);
@@ -40,15 +44,16 @@ const deleteCategory = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const category = await Category.findOne({ where: { id, userId: req.user.id } });
-    if (!category) {
+    const [updatedCount] = await Category.update({ archivedAt: new Date() }, {
+      where: { id, userId: req.user.id, archivedAt: null }
+    });
+    if (updatedCount === 0) {
       return res.status(404).json({ message: 'Kategoria nie znaleziona lub brak dostępu' });
     }
 
-    await category.destroy();
-    res.status(200).json({ message: 'Kategoria usunięta', id });
+    res.status(200).json({ message: 'Kategoria zarchiwizowana', id });
   } catch (error) {
-    console.error('[category-service] Błąd usuwania kategorii:', error);
+    console.error('[category-service] Błąd archiwizacji kategorii:', error);
     res.status(500).json({ message: 'Błąd serwera' });
   }
 };

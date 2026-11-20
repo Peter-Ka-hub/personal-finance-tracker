@@ -7,22 +7,14 @@ export default function TransactionForm({ categories }) {
   const queryClient = useQueryClient();
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [formError, setFormError] = useState("");
 
-  const filteredCategories = categories.filter((c) => c.type === type);
-
-  // set default category if empty or type changed
-  React.useEffect(() => {
-    if (
-      filteredCategories.length > 0 &&
-      !filteredCategories.find((c) => c.id === categoryId)
-    ) {
-      setCategoryId(filteredCategories[0].id);
-    }
-  }, [type, filteredCategories, categoryId]);
+  const filteredCategories = categories.filter((c) => c.type === type && !c.archivedAt);
+  const categoryId = filteredCategories.find((c) => c.id === selectedCategoryId)?.id
+    ?? filteredCategories[0]?.id ?? "";
 
   const addMutation = useMutation({
     mutationFn: addTransaction,
@@ -112,7 +104,7 @@ export default function TransactionForm({ categories }) {
           </label>
           <select
             value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
+            onChange={(e) => setSelectedCategoryId(e.target.value)}
             className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
           >
             {filteredCategories.map((cat) => (

@@ -1,7 +1,7 @@
 import axiosClient from './axiosClient';
 
 export const getCategories = async () => {
-  const response = await axiosClient.get('/categories');
+  const response = await axiosClient.get('/categories', { params: { includeArchived: true } });
   return response.data;
 };
 

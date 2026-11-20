@@ -61,7 +61,7 @@ flowchart TD
 | POST   | `/api/auth/login`        | —           | Logowanie, wydanie JWT i ponowienie oczekującej inicjalizacji |
 | GET    | `/api/categories`        | JWT         | Lista kategorii użytkownika |
 | POST   | `/api/categories`        | JWT         | Dodanie kategorii |
-| DELETE | `/api/categories/:id`    | JWT         | Usunięcie kategorii |
+| DELETE | `/api/categories/:id`    | JWT         | Archiwizacja kategorii |
 | POST   | `/api/categories/seed`   | `X-Internal-Key` | Zasiew domyślnych kategorii (wewnętrzny) |
 | GET    | `/api/transactions`      | JWT         | Lista transakcji użytkownika |
 | POST   | `/api/transactions`      | JWT         | Dodanie transakcji |
@@ -87,6 +87,30 @@ Przy aktualizacji uruchom najpierw nową wersję Categories, która tworzy
 tabelę znaczników, następnie przełącz ruch na nową wersję Auth, która dodaje
 tabelę oczekujących inicjalizacji. Obie tabele powstają podczas istniejącej
 synchronizacji schematu przy starcie usług.
+
+### Kategorie w historii transakcji
+
+Domyślne `GET /api/categories` zwraca aktywne kategorie użytkownika.
+`includeArchived=true` dodaje zarchiwizowane kategorie wraz z nazwą i kolorem.
+Transakcje bez istniejącej kategorii mają w interfejsie etykietę „Nieznana kategoria”.
+
+Categories dodaje nullable `archivedAt` podczas istniejącej synchronizacji schematu
+przy starcie. Uruchom nową wersję Categories, potwierdź obecność kolumny, a następnie
+przełącz Transactions i frontend. W czasie przełączenia wstrzymaj zapisy transakcji
+i archiwizację, dopóki obie usługi nie będą działały w nowych wersjach.
+Dotychczasowe kategorie pozostają aktywne. Nie ma nowych kluczy obcych ani
+uzupełniania historycznych powiązań. Po zapisaniu archiwizacji unikaj uruchamiania
+starszej wersji Categories z automatycznym `sync({ alter: true })`, ponieważ
+synchronizacja starszego modelu może usunąć kolumnę i stan archiwizacji.
+
+Transactions i Categories używają wspólnego PostgreSQL. Zapis transakcji
+sprawdza właściciela, typ i stan kategorii, blokując jej wiersz przez `FOR SHARE`
+w tej samej transakcji co zapis. Archiwizacja aktualizuje ten sam wiersz.
+Operacja, która pierwsza uzyska blokadę wiersza, rozstrzyga kolejność. Zapis,
+który czekał na archiwizację, po jej zatwierdzeniu ponownie sprawdza warunek
+aktywności. Przy rozdzieleniu ról PostgreSQL `FOR SHARE` wymaga dla Transactions
+dostępu do schematu Categories, prawa `SELECT` do używanych kolumn i prawa
+`UPDATE` do co najmniej jednej kolumny tabeli kategorii.
 
 ## Uruchomienie lokalne
 
@@ -128,6 +152,11 @@ Test współbieżności Categories można włączyć, ustawiając
 `CATEGORY_TEST_DATABASE_URL` na adres testowego PostgreSQL przed
 `npm --prefix services/categories test`. Test tworzy i usuwa własny,
 losowo nazwany schemat.
+
+Test blokad na PostgreSQL można włączyć przez `E2E_POSTGRES_URL` wskazujący na
+izolowaną bazę używaną przez stos E2E. Wymaga to także zainstalowania zależności
+`services/transactions` lokalnie. Test czasowo blokuje tabelę transakcji i zapisuje
+rekord ze starszym typem powiązania, więc uruchamiaj go na bazie testowej.
 
 ## CI/CD
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Archive, Plus } from "lucide-react";
 import { getCategories, addCategory, deleteCategory } from "../api/categoriesApi";
 
 export default function CategoriesSettings() {
@@ -18,7 +18,7 @@ export default function CategoriesSettings() {
   const addMutation = useMutation({
     mutationFn: addCategory,
     onSuccess: () => {
-      queryClient.invalidateQueries(['categories']);
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
       setName("");
       setFormError("");
     },
@@ -27,10 +27,10 @@ export default function CategoriesSettings() {
     }
   });
 
-  const deleteMutation = useMutation({
+  const archiveMutation = useMutation({
     mutationFn: deleteCategory,
     onSuccess: () => {
-      queryClient.invalidateQueries(['categories']);
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
     }
   });
 
@@ -43,8 +43,8 @@ export default function CategoriesSettings() {
     addMutation.mutate({ name, type, color, icon: 'circle' });
   };
 
-  const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories]);
-  const expenseCategories = useMemo(() => categories.filter(c => c.type === 'expense'), [categories]);
+  const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income' && !c.archivedAt), [categories]);
+  const expenseCategories = useMemo(() => categories.filter(c => c.type === 'expense' && !c.archivedAt), [categories]);
 
   if (isLoading) {
     return <div className="text-center py-10">Ładowanie kategorii...</div>;
@@ -141,11 +141,13 @@ export default function CategoriesSettings() {
                       <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color || '#9CA3AF' }}></div>
                       <span className="font-medium text-slate-700">{cat.name}</span>
                     </div>
-                    <button 
-                      onClick={() => deleteMutation.mutate(cat.id)}
+                    <button
+                      onClick={() => archiveMutation.mutate(cat.id)}
+                      aria-label={`Archiwizuj kategorię ${cat.name}`}
+                      title="Archiwizuj kategorię"
                       className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                     >
-                      <Trash2 size={16} />
+                      <Archive size={16} />
                     </button>
                   </div>
                 ))}
@@ -162,11 +164,13 @@ export default function CategoriesSettings() {
                       <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color || '#9CA3AF' }}></div>
                       <span className="font-medium text-slate-700">{cat.name}</span>
                     </div>
-                    <button 
-                      onClick={() => deleteMutation.mutate(cat.id)}
+                    <button
+                      onClick={() => archiveMutation.mutate(cat.id)}
+                      aria-label={`Archiwizuj kategorię ${cat.name}`}
+                      title="Archiwizuj kategorię"
                       className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                     >
-                      <Trash2 size={16} />
+                      <Archive size={16} />
                     </button>
                   </div>
                 ))}
