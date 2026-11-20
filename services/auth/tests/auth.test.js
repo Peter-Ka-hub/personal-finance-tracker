@@ -3,14 +3,26 @@ process.env.JWT_SECRET = 'test-secret-key-min-32-characters-long!!';
 delete process.env.CATEGORIES_SERVICE_URL; // skip the cross-service seed call
 
 jest.mock('../src/models/User');
+jest.mock('../src/models/PendingCategorySeed');
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const http = require('node:http');
+const { once } = require('node:events');
 const User = require('../src/models/User');
+const PendingCategorySeed = require('../src/models/PendingCategorySeed');
+const { sequelize } = require('../src/config/db');
 const app = require('../src/app');
 
-beforeEach(() => jest.clearAllMocks());
+const transaction = {};
+
+beforeEach(() => {
+  jest.resetAllMocks();
+  jest.spyOn(sequelize, 'transaction').mockImplementation((callback) => callback(transaction));
+});
+
+afterEach(() => jest.restoreAllMocks());
 
 describe('auth-service', () => {
   test('GET /health → 200 ok', async () => {
@@ -31,6 +43,8 @@ describe('auth-service', () => {
     expect(res.body.username).toBe('alice');
     const decoded = jwt.verify(res.body.token, process.env.JWT_SECRET);
     expect(decoded.username).toBe('alice');
+    expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ username: 'alice' }), { transaction });
+    expect(PendingCategorySeed.create).toHaveBeenCalledWith({ userId: 'user-1' }, { transaction });
 
     // password stored must be a bcrypt hash, never the plaintext
     const stored = User.create.mock.calls[0][0].password;
@@ -42,6 +56,75 @@ describe('auth-service', () => {
     const res = await request(app).post('/api/auth/register').send({ username: 'bob' });
     expect(res.status).toBe(400);
   });
+
+  test.each(['unavailable', 'slow'])(
+    'register and login survive %s Categories, then login completes the pending seed',
+    async (failure) => {
+      let recovered = false;
+      let seedRequests = 0;
+      const categories = http.createServer((req, res) => {
+        seedRequests += 1;
+        req.resume();
+        if (recovered) {
+          res.writeHead(201).end();
+        } else if (failure === 'slow') {
+          // Even after response headers the request must have a deadline.
+          res.writeHead(201, { 'Content-Length': '2' });
+          res.flushHeaders();
+        } else {
+          res.writeHead(503).end();
+        }
+      });
+      categories.listen(0, '127.0.0.1');
+      await once(categories, 'listening');
+      process.env.CATEGORIES_SERVICE_URL = `http://127.0.0.1:${categories.address().port}`;
+
+      const credentials = { username: 'alice', password: 'secret123' };
+      let stored;
+      let pending;
+      User.findOne.mockImplementation(async () => stored);
+      User.create.mockImplementation(async (values) => {
+        stored = { id: 'user-1', ...values };
+        return stored;
+      });
+      PendingCategorySeed.create.mockImplementation(async (record) => {
+        pending = record;
+      });
+      PendingCategorySeed.findByPk.mockImplementation(async () => pending);
+      PendingCategorySeed.destroy.mockImplementation(async () => {
+        pending = null;
+      });
+
+      try {
+        const registration = await request(app).post('/api/auth/register')
+          .timeout({ response: 3000 }).send(credentials);
+        expect(registration.status).toBe(201);
+        expect(jwt.verify(registration.body.token, process.env.JWT_SECRET).id).toBe('user-1');
+        expect(pending).toEqual({ userId: 'user-1' });
+
+        const loginDuringFailure = await request(app).post('/api/auth/login')
+          .timeout({ response: 3000 }).send(credentials);
+        expect(loginDuringFailure.status).toBe(200);
+        expect(PendingCategorySeed.destroy).not.toHaveBeenCalled();
+
+        recovered = true;
+        const loginAfterRecovery = await request(app).post('/api/auth/login').send(credentials);
+        expect(loginAfterRecovery.status).toBe(200);
+        expect(pending).toBeNull();
+        expect(seedRequests).toBe(3);
+
+        const nextLogin = await request(app).post('/api/auth/login').send(credentials);
+        expect(nextLogin.status).toBe(200);
+        expect(seedRequests).toBe(3);
+      } finally {
+        delete process.env.CATEGORIES_SERVICE_URL;
+        await new Promise((resolve) => {
+          categories.close(resolve);
+          categories.closeAllConnections();
+        });
+      }
+    }
+  );
 
   test('register rejects a too-short password', async () => {
     const res = await request(app)

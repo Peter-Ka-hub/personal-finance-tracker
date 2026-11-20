@@ -74,19 +74,14 @@ test('register creates a user and returns a JWT', async () => {
 });
 
 test('default categories are seeded for the new user', async () => {
-  // Seeding is an async auth -> categories call; allow a short retry window.
-  let categories = [];
-  for (let i = 0; i < 15; i++) {
-    const res = await fetch(`${BASE}/api/categories`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    assert.equal(res.status, 200);
-    categories = await res.json();
-    if (categories.length > 0) break;
-    await sleep(1000);
-  }
-  assert.ok(categories.length > 0, 'expected default categories to be seeded');
-  categoryId = categories[0].id;
+  const res = await fetch(`${BASE}/api/categories`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const categories = await res.json();
+  assert.equal(categories.length, 10, 'expected one set of default categories');
+  categoryId = categories.find((category) => category.type === 'expense')?.id;
+  assert.ok(categoryId, 'expected a default expense category');
 });
 
 test('create and list a transaction (data is persisted)', async () => {

@@ -3,6 +3,10 @@ const jwt = require('jsonwebtoken');
 const https = require('https');
 const http = require('http');
 const User = require('../models/User');
+const PendingCategorySeed = require('../models/PendingCategorySeed');
+const { sequelize } = require('../config/db');
+
+const CATEGORY_SEED_TIMEOUT_MS = 1000;
 
 const DEFAULT_CATEGORIES = [
   { name: 'Jedzenie', type: 'expense', color: '#EF4444', icon: 'pizza' },
@@ -19,11 +23,6 @@ const DEFAULT_CATEGORIES = [
 
 const seedCategories = async (userId) => {
   const categoriesUrl = process.env.CATEGORIES_SERVICE_URL;
-  if (!categoriesUrl) {
-    console.warn('[auth-service] CATEGORIES_SERVICE_URL not set — skipping category seed');
-    return;
-  }
-
   const body = JSON.stringify({ userId, categories: DEFAULT_CATEGORIES });
   const url = new URL(`${categoriesUrl}/api/categories/seed`);
   const transport = url.protocol === 'https:' ? https : http;
@@ -35,6 +34,7 @@ const seedCategories = async (userId) => {
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         method: 'POST',
+        signal: AbortSignal.timeout(CATEGORY_SEED_TIMEOUT_MS),
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
@@ -46,18 +46,35 @@ const seedCategories = async (userId) => {
         rejectUnauthorized: false,
       },
       (res) => {
+        res.on('error', reject);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`categories seed returned ${res.statusCode}`));
+          }
+        });
         res.resume();
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve();
-        } else {
-          reject(new Error(`categories seed returned ${res.statusCode}`));
-        }
       }
     );
     req.on('error', reject);
-    req.write(body);
-    req.end();
+    req.end(body);
   });
+};
+
+const completeCategorySeed = async (userId) => {
+  if (!process.env.CATEGORIES_SERVICE_URL) {
+    return;
+  }
+
+  try {
+    if (await PendingCategorySeed.findByPk(userId)) {
+      await seedCategories(userId);
+      await PendingCategorySeed.destroy({ where: { userId } });
+    }
+  } catch (error) {
+    console.warn('[auth-service] Inicjalizacja kategorii oczekuje na ponowienie:', error.message);
+  }
 };
 
 const register = async (req, res) => {
@@ -74,9 +91,13 @@ const register = async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const newUser = await User.create({ username, password: hashedPassword });
+    const newUser = await sequelize.transaction(async (transaction) => {
+      const user = await User.create({ username, password: hashedPassword }, { transaction });
+      await PendingCategorySeed.create({ userId: user.id }, { transaction });
+      return user;
+    });
 
-    await seedCategories(newUser.id);
+    await completeCategorySeed(newUser.id);
 
     const token = jwt.sign(
       { id: newUser.id, username: newUser.username },
@@ -107,6 +128,8 @@ const login = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({ message: 'Nieprawidłowa nazwa użytkownika lub hasło' });
     }
+
+    await completeCategorySeed(user.id);
 
     const token = jwt.sign(
       { id: user.id, username: user.username },

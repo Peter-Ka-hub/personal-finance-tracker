@@ -50,15 +50,15 @@ flowchart TD
 - **Brama Nginx** to jedyny publiczny punkt wejścia — frontend i serwisy są wewnętrzne.
   Frontend woła API relatywnie pod `/api`, więc **nie ma problemu z CORS**.
 - **Auth** wystawia JWT (HS256); pozostałe serwisy weryfikują token middlewarem.
-- Po rejestracji Auth woła Categories i **zasiewa 10 domyślnych kategorii** dla użytkownika —
-  to wywołanie wewnętrzne, chronione nagłówkiem `X-Internal-Key`, a nie JWT użytkownika.
+- Przy rejestracji Auth próbuje utworzyć **10 domyślnych kategorii** przez wywołanie
+  wewnętrzne chronione nagłówkiem `X-Internal-Key`.
 
 ## API (przez bramę, prefiks `/api`)
 
 | Metoda | Ścieżka                  | Auth        | Opis |
 |--------|--------------------------|-------------|------|
-| POST   | `/api/auth/register`     | —           | Rejestracja; zwraca JWT i zasiewa kategorie |
-| POST   | `/api/auth/login`        | —           | Logowanie; zwraca JWT |
+| POST   | `/api/auth/register`     | —           | Rejestracja, wydanie JWT i próba inicjalizacji kategorii |
+| POST   | `/api/auth/login`        | —           | Logowanie, wydanie JWT i ponowienie oczekującej inicjalizacji |
 | GET    | `/api/categories`        | JWT         | Lista kategorii użytkownika |
 | POST   | `/api/categories`        | JWT         | Dodanie kategorii |
 | DELETE | `/api/categories/:id`    | JWT         | Usunięcie kategorii |
@@ -68,6 +68,25 @@ flowchart TD
 | DELETE | `/api/transactions/:id`  | JWT         | Usunięcie transakcji |
 
 Każdy serwis wystawia też `GET /health`.
+
+### Odzyskiwanie po awarii Categories
+
+Auth zapisuje informację o oczekującej inicjalizacji razem z nowym kontem.
+Wywołanie Categories ma limit jednej sekundy. Rejestracja zwraca 201 z JWT
+również w przypadku awarii Categories. Przy kolejnym udanym logowaniu Auth
+ponawia oczekującą inicjalizację. Po powrocie usługi kategorie są widoczne po
+tym logowaniu i odczycie listy. Użytkownik, który pozostaje w aktywnej sesji,
+może się wylogować i zalogować ponownie, aby uruchomić ponowienie.
+
+Categories zapisuje znacznik i zestaw domyślny w jednej transakcji PostgreSQL.
+Znacznik pozostaje po usunięciu kategorii. Konta sprzed zmiany startują bez
+oczekującej inicjalizacji, ponieważ pusta lista może wynikać z decyzji
+użytkownika. Historyczne przypadki wymagają indywidualnej oceny.
+
+Przy aktualizacji uruchom najpierw nową wersję Categories, która tworzy
+tabelę znaczników, następnie przełącz ruch na nową wersję Auth, która dodaje
+tabelę oczekujących inicjalizacji. Obie tabele powstają podczas istniejącej
+synchronizacji schematu przy starcie usług.
 
 ## Uruchomienie lokalne
 
@@ -104,6 +123,11 @@ cd frontend && npm ci && npm test -- --watchAll=false
 # Testy e2e przez bramę (wymaga uruchomionego docker-compose)
 node --test e2e/app.test.mjs
 ```
+
+Test współbieżności Categories można włączyć, ustawiając
+`CATEGORY_TEST_DATABASE_URL` na adres testowego PostgreSQL przed
+`npm --prefix services/categories test`. Test tworzy i usuwa własny,
+losowo nazwany schemat.
 
 ## CI/CD
 
