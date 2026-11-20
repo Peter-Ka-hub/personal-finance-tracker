@@ -9,4 +9,6 @@ const categorySchema = z.object({
   icon: z.string().trim().max(40).optional(),
 });
 
-module.exports = { categorySchema };
+const idParamsSchema = z.object({ id: z.guid() });
+
+module.exports = { categorySchema, idParamsSchema };

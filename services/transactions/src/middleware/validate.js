@@ -1,8 +1,6 @@
-// Generic request-body validator backed by a Zod schema. On failure responds
-// with 400 and the list of field errors; on success replaces req.body with the
-// parsed (and coerced) data so controllers receive clean input.
-const validate = (schema) => (req, res, next) => {
-  const result = schema.safeParse(req.body);
+// Validate and replace the selected request data with the parsed fields.
+const validate = (schema, source = 'body') => (req, res, next) => {
+  const result = schema.safeParse(req[source]);
   if (!result.success) {
     return res.status(400).json({
       message: 'Nieprawidłowe dane wejściowe',
@@ -12,7 +10,7 @@ const validate = (schema) => (req, res, next) => {
       })),
     });
   }
-  req.body = result.data;
+  req[source] = result.data;
   next();
 };
 

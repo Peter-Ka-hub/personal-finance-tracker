@@ -13,6 +13,7 @@ import {
 import { getTransactions, deleteTransaction } from "../api/transactionsApi";
 import { getCategories } from "../api/categoriesApi";
 import TransactionForm from "../components/TransactionForm";
+import { groupCategoryTotals, UNKNOWN_CATEGORY_NAME } from "../utils/categoryTotals";
 
 const formatCurrency = (value) => {
   return new Intl.NumberFormat("pl-PL", {
@@ -92,45 +93,17 @@ export default function Dashboard() {
   }, [transactions]);
 
   // Top 3 wydatki i przychody (do podsumowania na dashboardzie)
-  const topExpenses = useMemo(() => {
-    const expenses = transactions.filter((t) => t.type === "expense");
-    const grouped = expenses.reduce((acc, curr) => {
-      const val = parseFloat(curr.amount);
-      const cat = categoriesMap[curr.categoryId];
-      const catName = cat ? cat.name : "Inne";
-      const catColor = cat?.color || "#9CA3AF";
-      if (!acc[catName]) {
-        acc[catName] = { value: 0, color: catColor };
-      }
-      acc[catName].value += val;
-      return acc;
-    }, {});
+  const topExpenses = useMemo(
+    () => groupCategoryTotals(transactions, categoriesMap, "expense")
+      .sort((a, b) => b.value - a.value).slice(0, 3),
+    [transactions, categoriesMap]
+  );
 
-    return Object.entries(grouped)
-      .map(([name, data]) => ({ name, value: data.value, color: data.color }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 3);
-  }, [transactions]);
-
-  const topIncomes = useMemo(() => {
-    const incomes = transactions.filter((t) => t.type === "income");
-    const grouped = incomes.reduce((acc, curr) => {
-      const val = parseFloat(curr.amount);
-      const cat = categoriesMap[curr.categoryId];
-      const catName = cat ? cat.name : "Inne";
-      const catColor = cat?.color || "#9CA3AF";
-      if (!acc[catName]) {
-        acc[catName] = { value: 0, color: catColor };
-      }
-      acc[catName].value += val;
-      return acc;
-    }, {});
-
-    return Object.entries(grouped)
-      .map(([name, data]) => ({ name, value: data.value, color: data.color }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 3);
-  }, [transactions]);
+  const topIncomes = useMemo(
+    () => groupCategoryTotals(transactions, categoriesMap, "income")
+      .sort((a, b) => b.value - a.value).slice(0, 3),
+    [transactions, categoriesMap]
+  );
 
   // Reset do bieżącego miesiąca
   const resetToCurrentMonth = () => {
@@ -266,16 +239,16 @@ export default function Dashboard() {
                   Top wydatki
                 </p>
                 <div className="space-y-2">
-                  {topExpenses.map((item, i) => {
+                  {topExpenses.map((item) => {
                     const pct =
                       totalExpense > 0
                         ? Math.round((item.value / totalExpense) * 100)
                         : 0;
                     return (
-                      <div key={i} className="flex items-center gap-2">
+                      <div key={item.id} className="flex items-center gap-2">
                         <div
                           className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: item.color }}
+                          style={{ backgroundColor: item.color || "#9CA3AF" }}
                         ></div>
                         <span className="text-sm text-slate-700 flex-1 truncate">
                           {item.name}
@@ -298,16 +271,16 @@ export default function Dashboard() {
                   Top przychody
                 </p>
                 <div className="space-y-2">
-                  {topIncomes.map((item, i) => {
+                  {topIncomes.map((item) => {
                     const pct =
                       totalIncome > 0
                         ? Math.round((item.value / totalIncome) * 100)
                         : 0;
                     return (
-                      <div key={i} className="flex items-center gap-2">
+                      <div key={item.id} className="flex items-center gap-2">
                         <div
                           className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: item.color }}
+                          style={{ backgroundColor: item.color || "#9CA3AF" }}
                         ></div>
                         <span className="text-sm text-slate-700 flex-1 truncate">
                           {item.name}
@@ -402,7 +375,7 @@ export default function Dashboard() {
                             ></span>
                             {categoriesMap[t.categoryId]
                               ? categoriesMap[t.categoryId].name
-                              : "Nieznana kategoria"}
+                              : UNKNOWN_CATEGORY_NAME}
                           </span>
                           <span>•</span>
                           <span>

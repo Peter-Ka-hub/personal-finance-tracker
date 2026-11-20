@@ -38,21 +38,45 @@ components:
       type: object
       required: [name, type]
       properties:
-        id: { type: string, readOnly: true }
+        id: { type: string, format: uuid, readOnly: true }
         name: { type: string, maxLength: 50, example: Jedzenie }
         type: { type: string, enum: [income, expense] }
         color: { type: string, example: "#EF4444" }
         icon: { type: string, example: pizza }
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+          description: Archive timestamp. Active categories have no archive timestamp.
     Transaction:
       type: object
       required: [type, amount, categoryId, description, date]
       properties:
-        id: { type: string, readOnly: true }
+        id: { type: string, format: uuid, readOnly: true }
         type: { type: string, enum: [income, expense] }
-        amount: { type: number, format: float, minimum: 0, example: 42.5 }
-        categoryId: { type: string }
+        amount:
+          oneOf:
+            - { type: number }
+            - { type: string }
+          example: "42.50"
+        categoryId: { type: string, format: uuid }
         description: { type: string, maxLength: 255, example: Lunch }
         date: { type: string, format: date, example: "2026-06-02" }
+    CreateTransaction:
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          properties:
+            amount:
+              description: Positive decimal amount from 0.01 to 99999999.99 with at most two fractional digits. Decimal strings may have surrounding whitespace.
+              oneOf:
+                - { type: number, minimum: 0.01, maximum: 99999999.99, multipleOf: 0.01 }
+                - { type: string, pattern: '^\s*0*[0-9]{1,8}(\.[0-9]{1,2})?\s*$' }
+            categoryId:
+              type: string
+              format: uuid
+              description: Active category owned by the authenticated user and matching the transaction type.
     Error:
       type: object
       properties:
@@ -109,7 +133,12 @@ paths:
   /api/categories:
     get:
       tags: [categories]
-      summary: List the authenticated user's categories
+      summary: List the authenticated user's active categories
+      parameters:
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
+          description: Set to true to include archived labels and colors for transaction history and charts.
       responses:
         '200':
           description: OK
@@ -132,13 +161,15 @@ paths:
   /api/categories/{id}:
     delete:
       tags: [categories]
-      summary: Delete an owned category
+      summary: Archive an active owned category
+      description: Existing transactions retain the category label. Archived categories cannot be used for new transactions.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '200': { description: Deleted }
+        '200': { description: Archived }
+        '400': { description: Invalid UUID }
         '401': { description: Missing or invalid token }
-        '404': { description: Not found / not owned }
+        '404': { description: Not found, not owned or already archived }
 
   /api/transactions:
     get:
@@ -158,18 +189,19 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/Transaction' }
+            schema: { $ref: '#/components/schemas/CreateTransaction' }
       responses:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Transaction' } } } }
-        '400': { description: Validation error }
+        '400': { description: Validation error or category unavailable for this transaction }
         '401': { description: Missing or invalid token }
   /api/transactions/{id}:
     delete:
       tags: [transactions]
       summary: Delete an owned transaction
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Deleted }
+        '400': { description: Invalid UUID }
         '401': { description: Missing or invalid token }
         '404': { description: Not found / not owned }

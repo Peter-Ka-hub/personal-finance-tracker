@@ -1,4 +1,5 @@
 import axiosClient from './api/axiosClient';
+import { getCategories } from './api/categoriesApi';
 
 // Note: rendering the full <App/> (react-router v7 + react-query + recharts) is
 // not exercised here because react-scripts 5's jest transform mishandles those
@@ -17,6 +18,16 @@ describe('frontend api client', () => {
     const config = onRequest({ headers: {} });
     expect(config.headers.Authorization).toBe('Bearer abc123');
     localStorage.removeItem('token');
+  });
+
+  test('requests archived categories for transaction history', async () => {
+    const get = jest.spyOn(axiosClient, 'get').mockResolvedValue({ data: [] });
+    try {
+      await getCategories();
+      expect(get).toHaveBeenCalledWith('/categories', { params: { includeArchived: true } });
+    } finally {
+      get.mockRestore();
+    }
   });
 
   test('does not attach an Authorization header when no token is stored', () => {

@@ -26,6 +26,10 @@ const Category = sequelize.define('Category', {
   icon: {
     type: DataTypes.STRING,
     allowNull: true,
+  },
+  archivedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
   }
 }, {
   timestamps: true,

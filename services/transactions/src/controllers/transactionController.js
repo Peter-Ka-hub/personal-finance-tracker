@@ -1,3 +1,5 @@
+const { QueryTypes, Transaction: DbTransaction } = require('sequelize');
+const { sequelize } = require('../config/db');
 const Transaction = require('../models/Transaction');
 
 const getTransactions = async (req, res) => {
@@ -15,21 +17,32 @@ const getTransactions = async (req, res) => {
 
 const addTransaction = async (req, res) => {
   const { type, amount, categoryId, description, date } = req.body;
-
-  if (!type || !amount || !categoryId || !description || !date) {
-    return res.status(400).json({ message: 'Brakujące dane transakcji' });
-  }
+  const userId = req.user.id;
 
   try {
-    const newTransaction = await Transaction.create({
-      userId: req.user.id,
-      type,
-      amount,
-      categoryId,
-      description,
-      date
+    const newTransaction = await sequelize.transaction({
+      isolationLevel: DbTransaction.ISOLATION_LEVELS.READ_COMMITTED,
+    }, async (transaction) => {
+      // This row lock conflicts with the archive UPDATE until the insert commits.
+      const [category] = await sequelize.query(`
+        SELECT id FROM categories."Categories"
+        WHERE id = $categoryId AND "userId" = $userId AND type = $type
+          AND "archivedAt" IS NULL
+        FOR SHARE
+      `, {
+        bind: { categoryId, userId, type },
+        type: QueryTypes.SELECT,
+        transaction,
+      });
+
+      if (!category) return null;
+
+      return Transaction.create({ userId, type, amount, categoryId, description, date }, { transaction });
     });
 
+    if (!newTransaction) {
+      return res.status(400).json({ message: 'Kategoria jest niedostępna dla tej transakcji' });
+    }
     res.status(201).json(newTransaction);
   } catch (error) {
     console.error('[transaction-service] Błąd dodawania transakcji:', error);
