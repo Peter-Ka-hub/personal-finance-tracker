@@ -13,6 +13,7 @@ import {
 import { getTransactions, deleteTransaction } from "../api/transactionsApi";
 import { getCategories } from "../api/categoriesApi";
 import TransactionForm from "../components/TransactionForm";
+import { formatCalendarDate, formatLocalDate } from "../utils/calendarDates";
 
 const formatCurrency = (value) => {
   return new Intl.NumberFormat("pl-PL", {
@@ -27,24 +28,21 @@ function getCurrentMonthRange() {
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   return {
-    startDate: start.toISOString().split("T")[0],
-    endDate: end.toISOString().split("T")[0],
+    startDate: formatLocalDate(start),
+    endDate: formatLocalDate(end),
   };
 }
 
 // Nazwa miesiąca po polsku
-function getMonthName(dateStr) {
-  const date = new Date(dateStr + "T00:00:00");
-  return date.toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+function getMonthName(date) {
+  return formatCalendarDate(date, { month: "long", year: "numeric" });
 }
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
 
   // Stan filtrowania dat – domyślnie bieżący miesiąc
-  const defaultRange = getCurrentMonthRange();
-  const [startDate, setStartDate] = useState(defaultRange.startDate);
-  const [endDate, setEndDate] = useState(defaultRange.endDate);
+  const [{ startDate, endDate }, setDateRange] = useState(getCurrentMonthRange);
 
   const { data: allTransactions = [], isLoading: txLoading } = useQuery({
     queryKey: ["transactions"],
@@ -134,9 +132,7 @@ export default function Dashboard() {
 
   // Reset do bieżącego miesiąca
   const resetToCurrentMonth = () => {
-    const range = getCurrentMonthRange();
-    setStartDate(range.startDate);
-    setEndDate(range.endDate);
+    setDateRange(getCurrentMonthRange());
   };
 
   if (txLoading || catLoading) {
@@ -162,15 +158,17 @@ export default function Dashboard() {
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="date"
+              aria-label="Początek zakresu dat"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => setDateRange({ startDate: e.target.value, endDate })}
               className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
             <span className="text-slate-400 text-sm">—</span>
             <input
               type="date"
+              aria-label="Koniec zakresu dat"
               value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => setDateRange({ startDate, endDate: e.target.value })}
               className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
             <button
@@ -405,9 +403,9 @@ export default function Dashboard() {
                               : "Nieznana kategoria"}
                           </span>
                           <span>•</span>
-                          <span>
-                            {new Date(t.date).toLocaleDateString("pl-PL")}
-                          </span>
+                          <time dateTime={t.date}>
+                            {formatCalendarDate(t.date)}
+                          </time>
                         </div>
                       </div>
                     </div>

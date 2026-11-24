@@ -2,14 +2,16 @@ import React, { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { addTransaction } from "../api/transactionsApi";
+import { formatLocalDate } from "../utils/calendarDates";
 
 export default function TransactionForm({ categories }) {
   const queryClient = useQueryClient();
+  const dateInputId = React.useId();
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(() => formatLocalDate(new Date()));
   const [formError, setFormError] = useState("");
 
   const filteredCategories = categories.filter((c) => c.type === type);
@@ -129,10 +131,11 @@ export default function TransactionForm({ categories }) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
+          <label htmlFor={dateInputId} className="block text-sm font-medium text-slate-700 mb-1">
             Data
           </label>
           <input
+            id={dateInputId}
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
